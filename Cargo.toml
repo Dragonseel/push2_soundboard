@@ -1,0 +1,26 @@
+[package]
+name = "push2_soundboard"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+midir = "0.7.0"
+anyhow = "1.0.56"
+thiserror = "1.0.30"
+gameloop = "0.2.0"
+push2_display = {git = "https://github.com/Dragonseel/push2_display"}
+embedded-graphics = "0.7.1"
+rodio = "*"
+tray-item = "*"
+ron = "*"
+serde = "*"
+serde_derive = "*"
+notify = "*"
+
+[build-dependencies]
+winres = "*"
+
+[features]
+console = []

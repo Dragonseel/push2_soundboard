@@ -1,0 +1,5 @@
+DeviceConfig(
+    sound_device: "VoiceMeeter Aux Input (VB-Audio VoiceMeeter AUX VAIO)",
+    midi_in: "Ableton Push 2",
+    midi_out: "Ableton Push 2",
+)
