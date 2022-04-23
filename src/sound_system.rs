@@ -25,8 +25,7 @@ impl SoundSystem {
         let default_host = rodio::cpal::default_host();
         let mut device_list = default_host.output_devices().unwrap();
 
-        let opt_device = device_list
-            .find(|x| x.name().unwrap() == device.as_ref());
+        let opt_device = device_list.find(|x| x.name().unwrap() == device.as_ref());
 
         let device = if opt_device.is_some() {
             opt_device.unwrap()

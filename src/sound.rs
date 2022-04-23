@@ -1,5 +1,6 @@
 use std::{
     io::{self, Read},
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -8,6 +9,7 @@ use rodio::Sink;
 use crate::sound_system::SoundSystem;
 
 pub struct Sound {
+    name: String,
     sound_data: Arc<Vec<u8>>,
     sink: Option<Sink>,
     pub looped: bool,
@@ -32,11 +34,25 @@ impl Sound {
         fade_out: bool,
         gain: f32,
     ) -> io::Result<Sound> {
+        let path = PathBuf::from(filename);
+
+        let name = if let Some(stem) = path.file_stem() {
+            if let Some(file_name) = stem.to_str() {
+                String::from(file_name)
+            } else {
+                String::from("Unknown")
+            }
+        } else {
+            String::from("Unknown")
+        };
+
         use std::fs::File;
         let mut buf = Vec::new();
-        let mut file = File::open(filename)?;
+        let mut file = File::open(path)?;
         file.read_to_end(&mut buf)?;
+
         Ok(Sound {
+            name,
             sound_data: Arc::new(buf),
             sink: None,
             looped,
@@ -50,6 +66,7 @@ impl Sound {
 
     pub fn cursor(self: &Self) -> io::Cursor<Sound> {
         io::Cursor::new(Sound {
+            name: self.name.clone(),
             sound_data: self.sound_data.clone(),
             sink: None,
             looped: self.looped,
@@ -67,6 +84,14 @@ impl Sound {
 
     fn looped_decoder(self: &Self) -> rodio::decoder::LoopedDecoder<io::Cursor<Sound>> {
         rodio::Decoder::new_looped(self.cursor()).unwrap()
+    }
+
+    pub fn get_name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn is_playing(&self) -> bool {
+        return self.sink.is_some();
     }
 
     pub fn stop(&mut self) {

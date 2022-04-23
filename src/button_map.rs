@@ -253,9 +253,13 @@ impl ButtonMap {
         }
     }
 
-    pub fn init_control_states(&mut self, sound_system: &mut SoundSystem, midiconn: Arc<Mutex<MidiConnection>>) {
-        /* ControlName::Control01  =>  Repress Mode */ {
-            
+    pub fn init_control_states(
+        &mut self,
+        sound_system: &mut SoundSystem,
+        midiconn: Arc<Mutex<MidiConnection>>,
+    ) {
+        /* ControlName::Control01  =>  Repress Mode */
+        {
             midiconn
                 .lock()
                 .unwrap()
@@ -296,7 +300,6 @@ impl ButtonMap {
         }
     }
 
-    // TODO: Make config hot-reloadable
     pub fn read_config(&mut self, path: &str, midiconn: &mut Arc<Mutex<MidiConnection>>) {
         let (tx, rx) = channel();
 
@@ -310,5 +313,17 @@ impl ButtonMap {
 
         self.file_watcher = Some(rx);
         self.file_watcher_intern = Some(watcher);
+    }
+
+    pub fn playing_sound_names(&self) -> Vec<(String, bool)> {
+        let mut names = vec![];
+
+        for (_button, sound) in &self.button_sounds {
+            if sound.is_playing() {
+                names.push((sound.get_name(), sound.looped));
+            }
+        }
+
+        names
     }
 }

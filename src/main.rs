@@ -15,12 +15,14 @@ use gameloop::{FrameAction, GameLoop, GameLoopError};
 use push2_display::*;
 
 use embedded_graphics::{
+    mono_font::{iso_8859_13::FONT_10X20, MonoTextStyle},
     pixelcolor::Bgr565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
+    text::Text,
 };
-use std::{convert::Infallible, fs::File, io::Read};
 use std::sync::{Arc, Mutex};
+use std::{convert::Infallible, fs::File, io::Read};
 use tray_item::TrayItem;
 
 use crate::midi::MidiMessage;
@@ -31,7 +33,7 @@ mod sound;
 mod sound_system;
 
 #[derive(Deserialize)]
-struct DeviceConfig{
+struct DeviceConfig {
     sound_device: String,
     midi_in: String,
     midi_out: String,
@@ -90,7 +92,6 @@ pub enum MyError {
 }
 
 fn run() -> Result<(), MyError> {
-
     let mut file = File::open("config/devices.ron").unwrap();
     let mut config_string = String::new();
     file.read_to_string(&mut config_string)
@@ -99,10 +100,10 @@ fn run() -> Result<(), MyError> {
     let device_config: DeviceConfig =
         ron::de::from_str(&config_string).expect("Could not deserialize DeviceConfig.");
 
-
     let mut display = Push2Display::new()?;
 
-    let (push2midi, receiver) = MidiConnection::new(&device_config.midi_in, &device_config.midi_out)?;
+    let (push2midi, receiver) =
+        MidiConnection::new(&device_config.midi_in, &device_config.midi_out)?;
 
     let mut push2midi = Arc::new(Mutex::new(push2midi));
 
@@ -134,7 +135,10 @@ fn run() -> Result<(), MyError> {
     })
     .unwrap();
 
-    button_mapping.lock().unwrap().init_control_states(&mut sound_system, Arc::clone(&push2midi));
+    button_mapping
+        .lock()
+        .unwrap()
+        .init_control_states(&mut sound_system, Arc::clone(&push2midi));
 
     let game_loop = GameLoop::new(60, 5)?;
     loop {
@@ -161,24 +165,64 @@ fn run() -> Result<(), MyError> {
                 } => {
                     display.clear(Bgr565::BLACK)?;
 
+                    // One-shots header
+                    Text::new(
+                        "One-Shots",
+                        Point { x: 50, y: 15 },
+                        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
+                    )
+                    .draw(&mut display)?;
+
                     Rectangle::new(
-                        Point { x: 10, y: 10 },
+                        Point { x: 50, y: 20 },
                         Size {
-                            width: 20,
-                            height: 20,
+                            width: 90,
+                            height: 2,
                         },
                     )
                     .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
                     .draw(&mut display)?;
 
-                    /*
+                    // Loops header
                     Text::new(
-                        if playing { "Playing" } else { "Stopped" },
-                        Point { x: 50, y: 10 },
-                        MonoTextStyle::new(&FONT_6X10, Bgr565::WHITE),
+                        "Loops",
+                        Point { x: 400, y: 15 },
+                        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
                     )
                     .draw(&mut display)?;
-                    */
+
+                    Rectangle::new(
+                        Point { x: 400, y: 20 },
+                        Size {
+                            width: 50,
+                            height: 2,
+                        },
+                    )
+                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+                    .draw(&mut display)?;
+
+                    let mut num_oneshots = 0;
+                    let mut num_looped = 0;
+
+                    for (name, looping) in
+                        button_mapping.lock().unwrap().playing_sound_names().iter()
+                    {
+                        Text::new(
+                            name,
+                            Point {
+                                x: if *looping { 400 } else { 50 },
+                                y: if *looping { num_looped } else { num_oneshots } * 15 + 40,
+                            },
+                            MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
+                        )
+                        .draw(&mut display)?;
+
+                        if *looping {
+                            num_looped += 1;
+                        } else {
+                            num_oneshots += 1;
+                        }
+                    }
 
                     display.flush()?;
                 }
