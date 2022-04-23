@@ -1482,8 +1482,9 @@ dependencies = [
 
 [[package]]
 name = "push2_display"
-version = "1.0.0-alpha.3"
-source = "git+https://github.com/Dragonseel/push2_display#68f75d70aee75d733bd0449d7f28f5a9bc8b583c"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31d6a046d399d502b823372d34f7728344fe852e9fef3301ce1de1f6de95337c"
 dependencies = [
  "embedded-graphics-core",
  "rusb",

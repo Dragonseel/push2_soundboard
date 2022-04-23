@@ -10,7 +10,7 @@ midir = "0.7.0"
 anyhow = "1.0.56"
 thiserror = "1.0.30"
 gameloop = "0.2.0"
-push2_display = {git = "https://github.com/Dragonseel/push2_display"}
+push2_display = "0.2.0"
 embedded-graphics = "0.7.1"
 rodio = "*"
 tray-item = "*"
