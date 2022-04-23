@@ -5,13 +5,16 @@ use midir::{
     MidiOutputPort,
 };
 
-use crate::{sound_system, MyError};
+use crate::MyError;
 use std::sync::mpsc::channel;
 
 pub enum MidiMessage {
     Btn(u8, u8),
     Volume(i8),
 }
+
+const CONTROL_CHANGE: u8 = 0xB0;
+const NOTE_ON: u8 = 0x90;
 
 #[allow(dead_code)]
 pub struct MidiConnection {
@@ -27,43 +30,33 @@ impl MidiConnection {
         in_name: &str,
         out_name: &str,
     ) -> Result<(MidiConnection, Receiver<MidiMessage>), MyError> {
-        let mut midi_in = MidiInput::new("midir reading input")?;
+        let mut midi_in = MidiInput::new("Push2_Soundboard-IN")?;
         midi_in.ignore(Ignore::None);
         let in_port = MidiConnection::get_midi_in_port(&midi_in, in_name)?;
 
-        let midi_out = MidiOutput::new("My Test Output")?;
+        let midi_out = MidiOutput::new("Push2_Soundboard-OUT")?;
         let out_port = MidiConnection::get_midi_out_port(&midi_out, out_name)?;
-        let conn_out = midi_out.connect(&out_port, "midir-test")?;
+        let conn_out = midi_out.connect(&out_port, "Push2_Soundboard-OutPort")?;
 
         let (tx1, rx1) = channel::<MidiMessage>();
         // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
         let conn_in = midi_in.connect(
             &in_port,
-            "midir-read-input",
+            "Push2_Soundboard-InPort",
             move |_, message, tx| {
                 match message {
-                    [0xB0, 0x4F, value] => {
-                        println!("X: {}", MidiConnection::get_endcoder_value(value));
-                    }
-                    [0xB0, 0x4E, value] => {
+                    [CONTROL_CHANGE, 0x4E, value] => {
                         tx.send(MidiMessage::Volume(MidiConnection::get_endcoder_value(
                             value,
                         )))
                         .unwrap();
                     }
-                    [0xB0, 0x0F, value] => {
-                        println!("X2: {}", MidiConnection::get_endcoder_value(value));
-                    }
-                    [0xB0, 0x47, value] => {
-                        println!("Y2: {}", MidiConnection::get_endcoder_value(value));
-                    }
-                    [0xB0, address, value] => {
+                    [CONTROL_CHANGE, address, value] => {
                         tx.send(MidiMessage::Btn(*address, *value)).unwrap();
                     }
-                    [0x90, address, value] => {
+                    [NOTE_ON, address, value] => {
                         tx.send(MidiMessage::Btn(*address, *value)).unwrap();
                     }
-                    [0xFE, _] => {}
                     _ => {
                         // println!("{}: {:X?} (len = {})", stamp, message, message.len());
                     }

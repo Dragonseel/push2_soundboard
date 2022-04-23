@@ -127,7 +127,7 @@ impl ButtonMap {
                         ControlName::Control01 => {
                             // Toggle Internal State
 
-                            let mut internal_state = sound_system.get_repress_mode();
+                            let mut internal_state = sound_system.repress_mode;
 
                             match internal_state {
                                 crate::sound_system::RepressMode::End => {
@@ -138,7 +138,7 @@ impl ButtonMap {
                                 }
                             }
 
-                            sound_system.set_repress_mode(internal_state);
+                            sound_system.repress_mode = internal_state;
 
                             midiconn
                                 .lock()
@@ -270,7 +270,7 @@ impl ButtonMap {
                 .send_to_device(&[
                     0b10110000,
                     29,
-                    match sound_system.get_repress_mode() {
+                    match sound_system.repress_mode {
                         crate::sound_system::RepressMode::End => 127u8,
                         crate::sound_system::RepressMode::Interrupt => 126u8,
                     },

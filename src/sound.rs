@@ -8,17 +8,27 @@ use rodio::Sink;
 
 use crate::sound_system::SoundSystem;
 
+#[derive(PartialEq, Clone, Copy)]
+enum SoundState {
+    Stopped,
+    FadingIn,
+    FadingOut,
+    Playing,
+}
+
 pub struct Sound {
-    name: String,
-    sound_data: Arc<Vec<u8>>,
-    sink: Option<Sink>,
-    pub looped: bool,
-    fade_in: bool,
-    fade_out: bool,
-    fading_in: bool,
-    fading_out: bool,
-    gain: f32,
+    // Runtime Data
+    state: SoundState,
     volume: f32,
+    sink: Option<Sink>,
+    sound_data: Arc<Vec<u8>>,
+
+    // Settings
+    name: String,
+    gain: f32,
+    fade_out: bool,
+    fade_in: bool,
+    pub looped: bool,
 }
 
 impl AsRef<[u8]> for Sound {
@@ -59,8 +69,7 @@ impl Sound {
             looped,
             fade_in,
             fade_out,
-            fading_in: false,
-            fading_out: false,
+            state: SoundState::Stopped,
             gain,
             volume: 0.0f32,
         })
@@ -74,8 +83,7 @@ impl Sound {
             looped: self.looped,
             fade_in: self.fade_in,
             fade_out: self.fade_out,
-            fading_in: self.fading_in,
-            fading_out: self.fading_out,
+            state: self.state,
             gain: self.gain,
             volume: self.volume,
         })
@@ -87,6 +95,34 @@ impl Sound {
 
     fn looped_decoder(self: &Self) -> rodio::decoder::LoopedDecoder<io::Cursor<Sound>> {
         rodio::Decoder::new_looped(self.cursor()).unwrap()
+    }
+
+    fn create_sink_and_append(&mut self, sound_system: &mut SoundSystem) {
+        let sink = sound_system.get_sink();
+
+        let (new_state, volume) = self.append_to_sink(&sink, sound_system);
+        self.state = new_state;
+        self.volume = volume;
+
+        self.sink = Some(sink);
+    }
+
+    fn append_to_sink(&self, sink: &Sink, sound_system: &mut SoundSystem) -> (SoundState, f32) {
+        if self.looped {
+            sink.append(self.looped_decoder());
+        } else {
+            sink.append(self.decoder());
+        }
+
+        if self.fade_in {
+            sink.set_volume(0.0);
+
+            (SoundState::FadingIn, 0.0)
+        } else {
+            sink.set_volume(sound_system.get_volume_factor() * self.gain);
+
+            (SoundState::Playing, self.gain)
+        }
     }
 
     pub fn get_name(&self) -> String {
@@ -107,27 +143,16 @@ impl Sound {
     pub fn play(&mut self, sound_system: &mut SoundSystem) -> bool {
         if let Some(sink) = &self.sink {
             if sink.empty() {
-                if self.looped {
-                    sink.append(self.looped_decoder());
-                } else {
-                    sink.append(self.decoder());
-                }
-
-                if self.fade_in {
-                    self.volume = 0.0;
-                    sink.set_volume(sound_system.get_volume_factor() * self.volume);
-                    self.fading_in = true;
-                } else {
-                    self.volume = self.gain;
-                    sink.set_volume(sound_system.get_volume_factor() * self.volume);
-                }
+                let (new_state, volume) = self.append_to_sink(sink, sound_system);
+                self.state = new_state;
+                self.volume = volume;
 
                 return true;
             } else {
-                match sound_system.get_repress_mode() {
+                match sound_system.repress_mode {
                     crate::sound_system::RepressMode::End => {
                         if self.fade_out {
-                            self.fading_out = true;
+                            self.state = SoundState::FadingOut;
                             return true;
                         } else {
                             sink.stop();
@@ -138,86 +163,64 @@ impl Sound {
                     crate::sound_system::RepressMode::Interrupt => {
                         sink.stop();
                         self.sink = None;
-                        let sink = sound_system.get_sink();
-
-                        if self.looped {
-                            sink.append(self.looped_decoder());
-                        } else {
-                            sink.append(self.decoder());
-                        }
-
-                        if self.fade_in {
-                            self.volume = 0.0;
-                            sink.set_volume(sound_system.get_volume_factor() * self.volume);
-                            self.fading_in = true;
-                        } else {
-                            self.volume = self.gain;
-                            sink.set_volume(sound_system.get_volume_factor() * self.volume);
-                        }
-
-                        self.sink = Some(sink);
+                        self.create_sink_and_append(sound_system);
                         return true;
                     }
                 }
             }
         } else {
-            let sink = sound_system.get_sink();
-
-            if self.looped {
-                sink.append(self.looped_decoder());
-            } else {
-                sink.append(self.decoder());
-            }
-
-            if self.fade_in {
-                self.volume = 0.0;
-                sink.set_volume(sound_system.get_volume_factor() * self.volume);
-                self.fading_in = true;
-            } else {
-                self.volume = self.gain;
-                sink.set_volume(sound_system.get_volume_factor() * self.volume);
-            }
-
-            self.sink = Some(sink);
+            self.create_sink_and_append(sound_system);
             return true;
         }
     }
 
     pub fn update(&mut self, sound_system: &mut SoundSystem) -> bool {
-        let mut playing;
         if let Some(sink) = &self.sink {
             if sink.empty() {
-                playing = false;
+                self.state = SoundState::Stopped;
             } else {
-                playing = true;
+                const FRAMERATE: f32 = 60.0f32;
+                const INCREASE_PER_FRAME: f32 = 1.5f32;
 
-                if self.fading_in {
-                    self.volume = f32::min(self.volume + (self.gain / 60.0) * 1.5, self.gain);
+                match self.state {
+                    SoundState::FadingIn => {
+                        self.volume = f32::min(
+                            self.volume + (self.gain / FRAMERATE) * INCREASE_PER_FRAME,
+                            self.gain,
+                        );
 
-                    if self.volume >= self.gain {
-                        self.fading_in = false;
+                        if self.volume >= self.gain {
+                            self.state = SoundState::Playing;
+                        }
                     }
-                }
-
-                if self.fading_out {
-                    self.fading_in = false;
-                    self.volume = f32::max(self.volume - (self.gain / 60.0) * 1.5, 0.0);
-                    if self.volume <= 0.0 {
-                        self.fading_out = false;
-                        playing = false;
+                    SoundState::FadingOut => {
+                        self.volume = f32::max(
+                            self.volume - (self.gain / FRAMERATE) * INCREASE_PER_FRAME,
+                            0.0,
+                        );
+                        if self.volume <= 0.0 {
+                            self.state = SoundState::Stopped;
+                        }
+                    }
+                    _ => {
+                        // No need to act right now
                     }
                 }
 
                 sink.set_volume(sound_system.get_volume_factor() * self.volume);
             }
         } else {
-            playing = false;
+            self.state = SoundState::Stopped;
         }
 
-        if self.sink.is_some() && !playing {
+        if self.sink.is_some() && self.state == SoundState::Stopped {
+            // Nothing playing but still a sink
+            // Take it out of option, stop and drop it.
             self.sink.take().unwrap().stop();
-        }
 
-        playing
+            return false;
+        } else {
+            return true;
+        }
     }
 }

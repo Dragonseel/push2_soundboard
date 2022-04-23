@@ -32,13 +32,6 @@ mod midi;
 mod sound;
 mod sound_system;
 
-#[derive(Deserialize)]
-struct DeviceConfig {
-    sound_device: String,
-    midi_in: String,
-    midi_out: String,
-}
-
 fn main() {
     match run() {
         Ok(_) => (),
@@ -91,6 +84,140 @@ pub enum MyError {
     Other(#[from] anyhow::Error), // source and Display delegate to anyhow::Error
 }
 
+const MAX_VOLUME: u32 = 400;
+const DEFAULT_VOLUME: u32 = 100;
+
+#[derive(Deserialize)]
+struct DeviceConfig {
+    sound_device: String,
+    midi_in: String,
+    midi_out: String,
+}
+
+fn draw_volume(sound_system: &mut SoundSystem, display: &mut Push2Display) -> Result<(), MyError> {
+    const VOLUME_BAR_X: i32 = 880;
+    const VOLUME_BAR_Y: i32 = 10;
+
+    const VOLUME_BAR_HEIGHT: u32 = 140;
+    const VOLUME_BAR_WIDTH: u32 = 30;
+
+    const TEXT_SIZE_OFFSET: f32 = 5.0;
+
+    // Outline
+    Rectangle::new(
+        Point {
+            x: VOLUME_BAR_X,
+            y: VOLUME_BAR_Y,
+        },
+        Size {
+            width: VOLUME_BAR_WIDTH,
+            height: VOLUME_BAR_HEIGHT,
+        },
+    )
+    .into_styled(PrimitiveStyle::with_stroke(Bgr565::WHITE, 2))
+    .draw(display)?;
+
+    let volume_factor =
+        sound_system.get_volume_factor() / (MAX_VOLUME as f32 / DEFAULT_VOLUME as f32);
+
+    // Fill for current volume
+    Rectangle::new(
+        Point {
+            x: VOLUME_BAR_X,
+            y: ((VOLUME_BAR_Y as f32) + (1.0 - volume_factor) * (VOLUME_BAR_HEIGHT as f32)) as i32,
+        },
+        Size {
+            width: VOLUME_BAR_WIDTH,
+            height: ((VOLUME_BAR_HEIGHT as f32) * volume_factor) as u32,
+        },
+    )
+    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+    .draw(display)?;
+
+    // 1.0 marker
+    Rectangle::new(
+        Point {
+            x: VOLUME_BAR_X - 5,
+            y: ((VOLUME_BAR_Y as f32) + (1.0 - 1.0 / 4.0) * (VOLUME_BAR_HEIGHT as f32)) as i32,
+        },
+        Size {
+            width: 5,
+            height: 2,
+        },
+    )
+    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+    .draw(display)?;
+
+    // 1.0 Text
+    Text::new(
+        "100%",
+        Point {
+            x: VOLUME_BAR_X - 50,
+            y: ((VOLUME_BAR_Y as f32)
+                + (1.0 - 1.0 / 4.0) * (VOLUME_BAR_HEIGHT as f32)
+                + TEXT_SIZE_OFFSET) as i32,
+        },
+        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
+    )
+    .draw(display)?;
+
+    // 4.0 marker
+    Rectangle::new(
+        Point {
+            x: VOLUME_BAR_X - 5,
+            y: VOLUME_BAR_Y as i32,
+        },
+        Size {
+            width: 5,
+            height: 2,
+        },
+    )
+    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+    .draw(display)?;
+
+    // 1.0 Text
+    Text::new(
+        "400%",
+        Point {
+            x: VOLUME_BAR_X - 50,
+            y: ((VOLUME_BAR_Y as f32)
+                + (1.0 - 4.0 / 4.0) * (VOLUME_BAR_HEIGHT as f32)
+                + TEXT_SIZE_OFFSET) as i32,
+        },
+        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
+    )
+    .draw(display)?;
+
+    // 0.0 marker
+    Rectangle::new(
+        Point {
+            x: VOLUME_BAR_X - 5,
+            y: ((VOLUME_BAR_Y as f32) + (1.0 - 0.0 / 4.0) * (VOLUME_BAR_HEIGHT as f32)) as i32,
+        },
+        Size {
+            width: 5,
+            height: 2,
+        },
+    )
+    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+    .draw(display)?;
+
+    // 0.0 Text
+    Text::new(
+        "0%",
+        Point {
+            x: VOLUME_BAR_X - 30,
+            y: ((VOLUME_BAR_Y as f32)
+                + (1.0 - 0.0 / 4.0) * (VOLUME_BAR_HEIGHT as f32)
+                + TEXT_SIZE_OFFSET) as i32,
+        },
+        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
+    )
+    .draw(display)?;
+
+    Ok(())
+}
+
 fn run() -> Result<(), MyError> {
     let mut file = File::open("config/devices.ron").unwrap();
     let mut config_string = String::new();
@@ -116,7 +243,7 @@ fn run() -> Result<(), MyError> {
     button_mapping
         .lock()
         .unwrap()
-        .read_config("config/example.ron", &mut push2midi);
+        .read_config("config/sound_config.ron", &mut push2midi);
 
     let mut sound_system = SoundSystem::new(&device_config.sound_device);
 
@@ -233,107 +360,7 @@ fn run() -> Result<(), MyError> {
 
                     // Volume bar
 
-                    // Outline
-                    Rectangle::new(
-                        Point { x: 880, y: 10 },
-                        Size {
-                            width: 30,
-                            height: 140,
-                        },
-                    )
-                    .into_styled(PrimitiveStyle::with_stroke(Bgr565::WHITE, 2))
-                    .draw(&mut display)?;
-
-                    let volume_factor = sound_system.get_volume_factor() / 4.0;
-
-                    // Fill for current volume
-                    Rectangle::new(
-                        Point {
-                            x: 880,
-                            y: (10.0 + (1.0 - volume_factor) * 140.0) as i32,
-                        },
-                        Size {
-                            width: 30,
-                            height: (140.0 * volume_factor) as u32,
-                        },
-                    )
-                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
-                    .draw(&mut display)?;
-
-                    // 1.0 marker
-                    Rectangle::new(
-                        Point {
-                            x: 875,
-                            y: (10.0 + (1.0 - 1.0 / 4.0) * 140.0) as i32,
-                        },
-                        Size {
-                            width: 5,
-                            height: 2,
-                        },
-                    )
-                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
-                    .draw(&mut display)?;
-
-                    // 1.0 Text
-                    Text::new(
-                        "100%",
-                        Point {
-                            x: 830,
-                            y: (10.0 + (1.0 - 1.0 / 4.0) * 140.0 + 5.0) as i32,
-                        },
-                        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
-                    )
-                    .draw(&mut display)?;
-
-                    // 4.0 marker
-                    Rectangle::new(
-                        Point {
-                            x: 875,
-                            y: (10.0 + (1.0 - 4.0 / 4.0) * 140.0) as i32,
-                        },
-                        Size {
-                            width: 5,
-                            height: 2,
-                        },
-                    )
-                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
-                    .draw(&mut display)?;
-
-                    // 1.0 Text
-                    Text::new(
-                        "400%",
-                        Point {
-                            x: 830,
-                            y: (10.0 + (1.0 - 4.0 / 4.0) * 140.0 + 5.0) as i32,
-                        },
-                        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
-                    )
-                    .draw(&mut display)?;
-
-                    // 0.0 marker
-                    Rectangle::new(
-                        Point {
-                            x: 875,
-                            y: (10.0 + (1.0 - 0.0 / 4.0) * 140.0) as i32,
-                        },
-                        Size {
-                            width: 5,
-                            height: 2,
-                        },
-                    )
-                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
-                    .draw(&mut display)?;
-
-                    // 0.0 Text
-                    Text::new(
-                        "0%",
-                        Point {
-                            x: 850,
-                            y: (10.0 + (1.0 - 0.0 / 4.0) * 140.0 + 5.0) as i32,
-                        },
-                        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
-                    )
-                    .draw(&mut display)?;
+                    draw_volume(&mut sound_system, &mut display)?;
 
                     display.flush()?;
                 }
