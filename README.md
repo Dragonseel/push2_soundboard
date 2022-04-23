@@ -6,12 +6,18 @@ It allows playback of different file-types though tested is only mp3 and wav.
 
 ## Features
 
+### Sound configuration
 - Fade-in and fade-out
-- Looped playback
-- Holding a button for interrupted restart of a sound
-- Per-sound gain
-- Hot reloading of sound mapping
-- Color-coded status of sounds on the Push2
+- Looping
+- Per sound gain
+- hot reloaded config-file
+
+### General
+- Configurable device-names
+- Color coded playback and config display on buttons
+- Interrupt-Mode for repeated play (for example for the classic Airhorn sound)
+- Display shows list of playing sounds
+- Volume control
 
 ## License
 
