@@ -145,7 +145,7 @@ fn run() -> Result<(), MyError> {
         for action in game_loop.actions() {
             match action {
                 FrameAction::Tick => {
-                    if let Ok(msg) = receiver.try_recv() {
+                    while let Ok(msg) = receiver.try_recv() {
                         match msg {
                             MidiMessage::Btn(address, _value) => {
                                 button_mapping.lock().unwrap().activate_button(
@@ -154,10 +154,16 @@ fn run() -> Result<(), MyError> {
                                     Arc::clone(&push2midi),
                                 );
                             }
+                            MidiMessage::Volume(change) => {
+                                sound_system.change_volume(change);
+                            }
                         }
                     }
 
-                    button_mapping.lock().unwrap().update(&mut push2midi);
+                    button_mapping
+                        .lock()
+                        .unwrap()
+                        .update(&mut sound_system, &mut push2midi);
                 }
 
                 FrameAction::Render {
@@ -201,6 +207,7 @@ fn run() -> Result<(), MyError> {
                     .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
                     .draw(&mut display)?;
 
+                    // Running sounds
                     let mut num_oneshots = 0;
                     let mut num_looped = 0;
 
@@ -223,6 +230,110 @@ fn run() -> Result<(), MyError> {
                             num_oneshots += 1;
                         }
                     }
+
+                    // Volume bar
+
+                    // Outline
+                    Rectangle::new(
+                        Point { x: 880, y: 10 },
+                        Size {
+                            width: 30,
+                            height: 140,
+                        },
+                    )
+                    .into_styled(PrimitiveStyle::with_stroke(Bgr565::WHITE, 2))
+                    .draw(&mut display)?;
+
+                    let volume_factor = sound_system.get_volume_factor() / 4.0;
+
+                    // Fill for current volume
+                    Rectangle::new(
+                        Point {
+                            x: 880,
+                            y: (10.0 + (1.0 - volume_factor) * 140.0) as i32,
+                        },
+                        Size {
+                            width: 30,
+                            height: (140.0 * volume_factor) as u32,
+                        },
+                    )
+                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+                    .draw(&mut display)?;
+
+                    // 1.0 marker
+                    Rectangle::new(
+                        Point {
+                            x: 875,
+                            y: (10.0 + (1.0 - 1.0 / 4.0) * 140.0) as i32,
+                        },
+                        Size {
+                            width: 5,
+                            height: 2,
+                        },
+                    )
+                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+                    .draw(&mut display)?;
+
+                    // 1.0 Text
+                    Text::new(
+                        "100%",
+                        Point {
+                            x: 830,
+                            y: (10.0 + (1.0 - 1.0 / 4.0) * 140.0 + 5.0) as i32,
+                        },
+                        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
+                    )
+                    .draw(&mut display)?;
+
+                    // 4.0 marker
+                    Rectangle::new(
+                        Point {
+                            x: 875,
+                            y: (10.0 + (1.0 - 4.0 / 4.0) * 140.0) as i32,
+                        },
+                        Size {
+                            width: 5,
+                            height: 2,
+                        },
+                    )
+                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+                    .draw(&mut display)?;
+
+                    // 1.0 Text
+                    Text::new(
+                        "400%",
+                        Point {
+                            x: 830,
+                            y: (10.0 + (1.0 - 4.0 / 4.0) * 140.0 + 5.0) as i32,
+                        },
+                        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
+                    )
+                    .draw(&mut display)?;
+
+                    // 0.0 marker
+                    Rectangle::new(
+                        Point {
+                            x: 875,
+                            y: (10.0 + (1.0 - 0.0 / 4.0) * 140.0) as i32,
+                        },
+                        Size {
+                            width: 5,
+                            height: 2,
+                        },
+                    )
+                    .into_styled(PrimitiveStyle::with_fill(Bgr565::WHITE))
+                    .draw(&mut display)?;
+
+                    // 0.0 Text
+                    Text::new(
+                        "0%",
+                        Point {
+                            x: 850,
+                            y: (10.0 + (1.0 - 0.0 / 4.0) * 140.0 + 5.0) as i32,
+                        },
+                        MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
+                    )
+                    .draw(&mut display)?;
 
                     display.flush()?;
                 }

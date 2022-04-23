@@ -18,6 +18,7 @@ pub struct Sound {
     fading_in: bool,
     fading_out: bool,
     gain: f32,
+    volume: f32,
 }
 
 impl AsRef<[u8]> for Sound {
@@ -61,6 +62,7 @@ impl Sound {
             fading_in: false,
             fading_out: false,
             gain,
+            volume: 0.0f32,
         })
     }
 
@@ -75,6 +77,7 @@ impl Sound {
             fading_in: self.fading_in,
             fading_out: self.fading_out,
             gain: self.gain,
+            volume: self.volume,
         })
     }
 
@@ -111,10 +114,12 @@ impl Sound {
                 }
 
                 if self.fade_in {
-                    sink.set_volume(0.0);
+                    self.volume = 0.0;
+                    sink.set_volume(sound_system.get_volume_factor() * self.volume);
                     self.fading_in = true;
                 } else {
-                    sink.set_volume(self.gain);
+                    self.volume = self.gain;
+                    sink.set_volume(sound_system.get_volume_factor() * self.volume);
                 }
 
                 return true;
@@ -142,10 +147,12 @@ impl Sound {
                         }
 
                         if self.fade_in {
-                            sink.set_volume(0.0);
+                            self.volume = 0.0;
+                            sink.set_volume(sound_system.get_volume_factor() * self.volume);
                             self.fading_in = true;
                         } else {
-                            sink.set_volume(self.gain);
+                            self.volume = self.gain;
+                            sink.set_volume(sound_system.get_volume_factor() * self.volume);
                         }
 
                         self.sink = Some(sink);
@@ -163,10 +170,12 @@ impl Sound {
             }
 
             if self.fade_in {
-                sink.set_volume(0.0);
+                self.volume = 0.0;
+                sink.set_volume(sound_system.get_volume_factor() * self.volume);
                 self.fading_in = true;
             } else {
-                sink.set_volume(self.gain);
+                self.volume = self.gain;
+                sink.set_volume(sound_system.get_volume_factor() * self.volume);
             }
 
             self.sink = Some(sink);
@@ -174,7 +183,7 @@ impl Sound {
         }
     }
 
-    pub fn update(&mut self) -> bool {
+    pub fn update(&mut self, sound_system: &mut SoundSystem) -> bool {
         let mut playing;
         if let Some(sink) = &self.sink {
             if sink.empty() {
@@ -183,23 +192,23 @@ impl Sound {
                 playing = true;
 
                 if self.fading_in {
-                    sink.set_volume(f32::min(
-                        sink.volume() + (self.gain / 60.0) * 1.5,
-                        self.gain,
-                    ));
-                    if sink.volume() >= self.gain {
+                    self.volume = f32::min(self.volume + (self.gain / 60.0) * 1.5, self.gain);
+
+                    if self.volume >= self.gain {
                         self.fading_in = false;
                     }
                 }
 
                 if self.fading_out {
                     self.fading_in = false;
-                    sink.set_volume(f32::max(sink.volume() - (self.gain / 60.0) * 1.5, 0.0));
-                    if sink.volume() <= 0.0 {
+                    self.volume = f32::max(self.volume - (self.gain / 60.0) * 1.5, 0.0);
+                    if self.volume <= 0.0 {
                         self.fading_out = false;
                         playing = false;
                     }
                 }
+
+                sink.set_volume(sound_system.get_volume_factor() * self.volume);
             }
         } else {
             playing = false;

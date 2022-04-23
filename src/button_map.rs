@@ -190,7 +190,11 @@ impl ButtonMap {
         }
     }
 
-    pub fn update(&mut self, midiconn: &mut Arc<Mutex<MidiConnection>>) {
+    pub fn update(
+        &mut self,
+        sound_system: &mut SoundSystem,
+        midiconn: &mut Arc<Mutex<MidiConnection>>,
+    ) {
         let mut need_reload = None;
 
         if let Some(ref watcher) = self.file_watcher {
@@ -220,7 +224,7 @@ impl ButtonMap {
         }
 
         for (btn_name, sound) in &mut self.button_sounds {
-            if !sound.update() {
+            if !sound.update(sound_system) {
                 let address = self
                     .button_values
                     .iter()

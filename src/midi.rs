@@ -5,11 +5,12 @@ use midir::{
     MidiOutputPort,
 };
 
-use crate::MyError;
+use crate::{sound_system, MyError};
 use std::sync::mpsc::channel;
 
 pub enum MidiMessage {
     Btn(u8, u8),
+    Volume(i8),
 }
 
 #[allow(dead_code)]
@@ -45,7 +46,10 @@ impl MidiConnection {
                         println!("X: {}", MidiConnection::get_endcoder_value(value));
                     }
                     [0xB0, 0x4E, value] => {
-                        println!("Y: {}", MidiConnection::get_endcoder_value(value));
+                        tx.send(MidiMessage::Volume(MidiConnection::get_endcoder_value(
+                            value,
+                        )))
+                        .unwrap();
                     }
                     [0xB0, 0x0F, value] => {
                         println!("X2: {}", MidiConnection::get_endcoder_value(value));

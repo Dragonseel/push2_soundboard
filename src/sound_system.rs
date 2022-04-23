@@ -18,6 +18,8 @@ pub struct SoundSystem {
     stream_handle: OutputStreamHandle,
 
     repress_mode: RepressMode,
+
+    volume: u32,
 }
 
 impl SoundSystem {
@@ -45,6 +47,7 @@ impl SoundSystem {
             stream,
             stream_handle,
             repress_mode: RepressMode::End,
+            volume: 100,
         }
     }
 
@@ -58,5 +61,18 @@ impl SoundSystem {
 
     pub fn set_repress_mode(&mut self, mode: RepressMode) {
         self.repress_mode = mode;
+    }
+
+    pub fn change_volume(&mut self, change: i8) {
+        if change.is_negative() {
+            self.volume = self.volume.saturating_sub(change.abs() as u32);
+        } else {
+            self.volume = u32::min(400, self.volume.saturating_add(change as u32));
+        }
+        println!("Volume: {}", self.volume);
+    }
+
+    pub fn get_volume_factor(&self) -> f32 {
+        self.volume as f32 / 100.0
     }
 }
