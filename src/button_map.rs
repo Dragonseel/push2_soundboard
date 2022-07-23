@@ -38,28 +38,23 @@ mod unformatted {
     }
 }
 
-use crate::{midi::MidiConnection, sound::Sound, sound_system::SoundSystem};
+use crate::{
+    actions::Action,
+    actions::{sound::Sound, ActionConfig, command::Command},
+    midi::MidiConnection,
+    sound_system::SoundSystem,
+};
 use notify::{watcher, DebouncedEvent, ReadDirectoryChangesWatcher, Watcher};
 pub use unformatted::{ButtonType, ControlName, NoteName};
 
 #[derive(Deserialize)]
-struct SingleSoundConfig {
-    button: ButtonType,
-    path: String,
-    looping: bool,
-    fade_in: bool,
-    fade_out: bool,
-    gain: f32,
-}
-
-#[derive(Deserialize)]
-struct SoundConfig {
-    sounds: Vec<SingleSoundConfig>,
+struct ActionConfigs {
+    actions: Vec<ActionConfig>,
 }
 
 pub struct ButtonMap {
     button_values: HashMap<u8, ButtonType>,
-    button_sounds: HashMap<ButtonType, Sound>,
+    button_actions: HashMap<ButtonType, Action>,
     file_watcher: Option<Receiver<DebouncedEvent>>,
     file_watcher_intern: Option<ReadDirectoryChangesWatcher>,
 }
@@ -76,22 +71,22 @@ impl ButtonMap {
 
         ButtonMap {
             button_values: button_values,
-            button_sounds: HashMap::new(),
+            button_actions: HashMap::new(),
             file_watcher: None,
             file_watcher_intern: None,
         }
     }
 
-    pub fn add_sound(
+    pub fn add_action(
         &mut self,
         button: ButtonType,
-        sound: Sound,
+        action: Action,
         midiconn: &mut Arc<Mutex<MidiConnection>>,
     ) {
-        if !self.button_sounds.contains_key(&button) {
-            self.button_sounds.insert(button, sound);
+        if !self.button_actions.contains_key(&button) {
+            self.button_actions.insert(button, action);
         } else {
-            *self.button_sounds.get_mut(&button).unwrap() = sound;
+            *self.button_actions.get_mut(&button).unwrap() = action;
         }
 
         let address = self
@@ -106,10 +101,7 @@ impl ButtonMap {
             .send_to_device(&[
                 0b10010001,
                 *address,
-                match self.button_sounds[&button].looped {
-                    true => 125u8,
-                    false => 56u8,
-                },
+                self.button_actions[&button].get_default_color(),
             ])
             .unwrap();
     }
@@ -157,14 +149,14 @@ impl ButtonMap {
                 }
                 ButtonType::Note(_note) => {
                     if self
-                        .button_sounds
+                        .button_actions
                         .contains_key(&self.button_values[&address])
                     {
                         let _playing = self
-                            .button_sounds
+                            .button_actions
                             .get_mut(&self.button_values[&address])
                             .unwrap()
-                            .play(sound_system);
+                            .execute(sound_system);
 
                         midiconn
                             .lock()
@@ -172,16 +164,10 @@ impl ButtonMap {
                             .send_to_device(&[
                                 0b10010000,
                                 address,
-                                if self
-                                    .button_sounds
+                                self.button_actions
                                     .get_mut(&self.button_values[&address])
                                     .unwrap()
-                                    .looped
-                                {
-                                    127u8
-                                } else {
-                                    126u8
-                                },
+                                    .get_active_color(),
                             ])
                             .unwrap();
                     }
@@ -210,12 +196,17 @@ impl ButtonMap {
 
         if let Some(changed) = need_reload {
             // stop all sounds
-            for (_btn_name, sound) in &mut self.button_sounds {
-                sound.stop();
+            for (_btn_name, action) in &mut self.button_actions {
+                match action {
+                    Action::Sound(sound) => {
+                        sound.stop();
+                    }
+                    Action::Command(_) => {}
+                }
             }
 
             // unload all sounds
-            self.button_sounds.clear();
+            self.button_actions.clear();
 
             self.clear_button_lights(Arc::clone(midiconn));
 
@@ -223,19 +214,28 @@ impl ButtonMap {
             self.read_config_impl(&changed, midiconn)
         }
 
-        for (btn_name, sound) in &mut self.button_sounds {
-            if !sound.update(sound_system) {
-                let address = self
-                    .button_values
-                    .iter()
-                    .find_map(|(key, &val)| if val == *btn_name { Some(key) } else { None })
-                    .unwrap();
+        for (btn_name, action) in &mut self.button_actions {
+            match action {
+                Action::Sound(sound) => {
+                    if !sound.update(sound_system) {
+                        let address = self
+                            .button_values
+                            .iter()
+                            .find_map(|(key, &val)| if val == *btn_name { Some(key) } else { None })
+                            .unwrap();
 
-                midiconn
-                    .lock()
-                    .unwrap()
-                    .send_to_device(&[0b10010000, *address, if sound.looped { 125 } else { 62u8 }])
-                    .unwrap();
+                        midiconn
+                            .lock()
+                            .unwrap()
+                            .send_to_device(&[
+                                0b10010000,
+                                *address,
+                                if sound.looped { 125 } else { 62u8 },
+                            ])
+                            .unwrap();
+                    }
+                }
+                Action::Command(_) => {}
             }
         }
     }
@@ -285,22 +285,27 @@ impl ButtonMap {
         file.read_to_string(&mut config_string)
             .expect("Could not read config file.");
 
-        let sound_config: SoundConfig =
+        let action_configs: ActionConfigs =
             ron::de::from_str(&config_string).expect("Could not deserialize SoundConfig.");
 
-        for sound in sound_config.sounds {
-            self.add_sound(
-                sound.button,
-                Sound::load(
-                    sound.path,
-                    sound.looping,
-                    sound.fade_in,
-                    sound.fade_out,
-                    sound.gain,
-                )
-                .unwrap(),
-                midiconn,
-            );
+        for action in action_configs.actions {
+            match action {
+                ActionConfig::SoundConfig {
+                    button,
+                    path,
+                    looping,
+                    fade_in,
+                    fade_out,
+                    gain,
+                } => self.add_action(
+                    button,
+                    Action::Sound(Sound::load(path, looping, fade_in, fade_out, gain).unwrap()),
+                    midiconn,
+                ),
+                ActionConfig::CommandConfig { button, command, args } => {
+                    self.add_action(button, Action::Command(Command::new(command, args)), midiconn)
+                }
+            }
         }
     }
 
@@ -322,9 +327,14 @@ impl ButtonMap {
     pub fn playing_sound_names(&self) -> Vec<(String, bool)> {
         let mut names = vec![];
 
-        for (_button, sound) in &self.button_sounds {
-            if sound.is_playing() {
-                names.push((sound.get_name(), sound.looped));
+        for (_button, action) in &self.button_actions {
+            match action {
+                Action::Sound(sound) => {
+                    if sound.is_playing() {
+                        names.push((sound.get_name(), sound.looped));
+                    }
+                }
+                Action::Command(_) => {}
             }
         }
 

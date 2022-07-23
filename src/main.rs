@@ -27,9 +27,9 @@ use tray_item::TrayItem;
 
 use crate::midi::MidiMessage;
 
+mod actions;
 mod button_map;
 mod midi;
-mod sound;
 mod sound_system;
 
 fn main() {

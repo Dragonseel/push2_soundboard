@@ -6,7 +6,10 @@ use std::{
 
 use rodio::Sink;
 
-use crate::sound_system::SoundSystem;
+use crate::{button_map::ButtonType, sound_system::SoundSystem};
+
+#[derive(Deserialize)]
+pub struct SingleSoundConfig {}
 
 #[derive(PartialEq, Clone, Copy)]
 enum SoundState {
