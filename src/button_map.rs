@@ -10,17 +10,31 @@ use std::{
     time::Duration,
 };
 
+use embedded_graphics::{
+    mono_font::{iso_8859_13::FONT_10X20, MonoTextStyle},
+    pixelcolor::Bgr565,
+    prelude::*,
+    primitives::{PrimitiveStyle, Rectangle},
+    text::Text,
+};
+use notify_debouncer_full::{
+    new_debouncer,
+    notify::{ReadDirectoryChangesWatcher, RecursiveMode, Watcher},
+    DebounceEventResult, DebouncedEvent, Debouncer, FileIdMap,
+};
+use push2_display::Push2Display;
+
 #[rustfmt::skip]
 mod unformatted {
 
-    #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize)]
+    #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize, Debug)]
     pub enum ButtonType {
         ControlChange(ControlName),
         Note(NoteName)
     }
 
 
-    #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize)]
+    #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize, Debug)]
     pub enum NoteName {
         Pad0x7, Pad1x7, Pad2x7, Pad3x7, Pad4x7, Pad5x7, Pad6x7, Pad7x7,
         Pad0x6, Pad1x6, Pad2x6, Pad3x6, Pad4x6, Pad5x6, Pad6x6, Pad7x6,
@@ -32,35 +46,41 @@ mod unformatted {
         Pad0x0, Pad1x0, Pad2x0, Pad3x0, Pad4x0, Pad5x0, Pad6x0, Pad7x0,
     }
 
-    #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize)]
+    #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize, Debug)]
     pub enum ControlName {
-        Control01,
+        Control29,
+        Control20,
+        Control21,
+        Control24,
+        Control25,
     }
 }
 
 use crate::{
     actions::Action,
-    actions::{sound::Sound, ActionConfig, command::Command},
+    actions::{command::Command, sound::Sound, ActionConfig},
+    device_modes::{sound_mode::SoundMode, DeviceMode, LightAction, spotify_mode::SpotifyMode},
     midi::MidiConnection,
     sound_system::SoundSystem,
+    spotify::Spotify,
+    MyError, DEFAULT_VOLUME, MAX_VOLUME,
 };
-use notify::{watcher, DebouncedEvent, ReadDirectoryChangesWatcher, Watcher};
 pub use unformatted::{ButtonType, ControlName, NoteName};
-
-#[derive(Deserialize)]
-struct ActionConfigs {
-    actions: Vec<ActionConfig>,
-}
 
 pub struct ButtonMap {
     button_values: HashMap<u8, ButtonType>,
-    button_actions: HashMap<ButtonType, Action>,
-    file_watcher: Option<Receiver<DebouncedEvent>>,
-    file_watcher_intern: Option<ReadDirectoryChangesWatcher>,
+
+    device_modes: Vec<Box<dyn DeviceMode>>,
+    current_mode: usize,
+
+    button_lights_dirty: bool,
 }
 
 impl ButtonMap {
-    pub fn new() -> ButtonMap {
+    pub fn new(
+        sound_system: Arc<Mutex<SoundSystem>>,
+        midiconn: &Arc<Mutex<MidiConnection>>,
+    ) -> ButtonMap {
         let mut file = File::open("config/buttonvalues.ron").unwrap();
         let mut config_string = String::new();
         file.read_to_string(&mut config_string)
@@ -69,182 +89,87 @@ impl ButtonMap {
         let button_values: HashMap<u8, ButtonType> =
             ron::de::from_str(&config_string).expect("Could not deserialize SoundConfig.");
 
+        let mut device_modes: Vec<Box<dyn DeviceMode>> = Vec::new();
+        device_modes.push(Box::new(SoundMode::new(sound_system)));
+        device_modes.push(Box::new(SpotifyMode::new()));
+
+        device_modes[0].apply_button_lights(midiconn, &button_values);
+
         ButtonMap {
             button_values: button_values,
-            button_actions: HashMap::new(),
-            file_watcher: None,
-            file_watcher_intern: None,
+            device_modes,
+            current_mode: 0_usize,
+            button_lights_dirty: true,
         }
     }
 
-    pub fn add_action(
-        &mut self,
-        button: ButtonType,
-        action: Action,
-        midiconn: &mut Arc<Mutex<MidiConnection>>,
-    ) {
-        if !self.button_actions.contains_key(&button) {
-            self.button_actions.insert(button, action);
-        } else {
-            *self.button_actions.get_mut(&button).unwrap() = action;
-        }
+    pub async fn activate_button(&mut self, address: u8, midiconn: &Arc<Mutex<MidiConnection>>) {
+        let mut light_action = LightAction::None;
 
-        let address = self
-            .button_values
-            .iter()
-            .find_map(|(key, &val)| if val == button { Some(key) } else { None })
-            .unwrap();
-
-        midiconn
-            .lock()
-            .unwrap()
-            .send_to_device(&[
-                0b10010001,
-                *address,
-                self.button_actions[&button].get_default_color(),
-            ])
-            .unwrap();
-    }
-
-    pub fn activate_button(
-        &mut self,
-        address: u8,
-        sound_system: &mut SoundSystem,
-        midiconn: Arc<Mutex<MidiConnection>>,
-    ) {
         if self.button_values.contains_key(&address) {
             match &self.button_values[&address] {
-                ButtonType::ControlChange(control) => {
-                    match control {
-                        ControlName::Control01 => {
-                            // Toggle Internal State
+                ButtonType::ControlChange(control_name) => {
 
-                            let mut internal_state = sound_system.repress_mode;
+                    let mut control_change = false;
+                    if *control_name == ControlName::Control20 {
+                        self.current_mode = 0;
+                        control_change = true;
+                    }
+                    else if *control_name == ControlName::Control21 {
+                        self.current_mode = 1;
+                        control_change = true;
+                    }
 
-                            match internal_state {
-                                crate::sound_system::RepressMode::End => {
-                                    internal_state = crate::sound_system::RepressMode::Interrupt
-                                }
-                                crate::sound_system::RepressMode::Interrupt => {
-                                    internal_state = crate::sound_system::RepressMode::End
-                                }
-                            }
-
-                            sound_system.repress_mode = internal_state;
-
-                            midiconn
-                                .lock()
-                                .unwrap()
-                                .send_to_device(&[
-                                    0b10110000,
-                                    address,
-                                    match internal_state {
-                                        crate::sound_system::RepressMode::End => 127u8,
-                                        crate::sound_system::RepressMode::Interrupt => 126u8,
-                                    },
-                                ])
-                                .unwrap();
-                        }
+                    light_action = self.device_modes[self.current_mode].control_press(*control_name);
+                    
+                    if control_change {
+                        light_action = LightAction::ClearAndReapply;
                     }
                 }
-                ButtonType::Note(_note) => {
-                    if self
-                        .button_actions
-                        .contains_key(&self.button_values[&address])
-                    {
-                        let _playing = self
-                            .button_actions
-                            .get_mut(&self.button_values[&address])
-                            .unwrap()
-                            .execute(sound_system);
-
-                        midiconn
-                            .lock()
-                            .unwrap()
-                            .send_to_device(&[
-                                0b10010000,
-                                address,
-                                self.button_actions
-                                    .get_mut(&self.button_values[&address])
-                                    .unwrap()
-                                    .get_active_color(),
-                            ])
-                            .unwrap();
-                    }
+                ButtonType::Note(note_name) => {
+                    light_action = self.device_modes[self.current_mode].button_press(*note_name)
                 }
+            }
+        }
+
+        match light_action {
+            LightAction::None => {}
+            LightAction::Reapply => {
+                self.device_modes[self.current_mode]
+                    .apply_button_lights(midiconn, &self.button_values);
+            }
+            LightAction::ClearAndReapply => {
+                self.clear_button_lights(midiconn);
+                self.device_modes[self.current_mode]
+                    .apply_button_lights(midiconn, &self.button_values);
             }
         }
     }
 
-    pub fn update(
-        &mut self,
-        sound_system: &mut SoundSystem,
-        midiconn: &mut Arc<Mutex<MidiConnection>>,
-    ) {
-        let mut need_reload = None;
+    pub fn update(&mut self, midiconn: &mut Arc<Mutex<MidiConnection>>) {
+        let light_action: LightAction = self.device_modes[self.current_mode].update();
 
-        if let Some(ref watcher) = self.file_watcher {
-            while let Ok(msg) = watcher.try_recv() {
-                match msg {
-                    DebouncedEvent::Write(path) => {
-                        need_reload = Some(path);
-                    }
-                    _ => (),
-                }
+        match light_action {
+            LightAction::None => {}
+            LightAction::Reapply => {
+                self.device_modes[self.current_mode]
+                    .apply_button_lights(midiconn, &self.button_values);
             }
-        }
-
-        if let Some(changed) = need_reload {
-            // stop all sounds
-            for (_btn_name, action) in &mut self.button_actions {
-                match action {
-                    Action::Sound(sound) => {
-                        sound.stop();
-                    }
-                    Action::Command(_) => {}
-                }
-            }
-
-            // unload all sounds
-            self.button_actions.clear();
-
-            self.clear_button_lights(Arc::clone(midiconn));
-
-            // parse new sounds
-            self.read_config_impl(&changed, midiconn)
-        }
-
-        for (btn_name, action) in &mut self.button_actions {
-            match action {
-                Action::Sound(sound) => {
-                    if !sound.update(sound_system) {
-                        let address = self
-                            .button_values
-                            .iter()
-                            .find_map(|(key, &val)| if val == *btn_name { Some(key) } else { None })
-                            .unwrap();
-
-                        midiconn
-                            .lock()
-                            .unwrap()
-                            .send_to_device(&[
-                                0b10010000,
-                                *address,
-                                if sound.looped { 125 } else { 62u8 },
-                            ])
-                            .unwrap();
-                    }
-                }
-                Action::Command(_) => {}
+            LightAction::ClearAndReapply => {
+                self.clear_button_lights(midiconn);
+                self.device_modes[self.current_mode]
+                    .apply_button_lights(midiconn, &self.button_values);
             }
         }
     }
 
-    pub fn clear_button_lights(&mut self, midiconn: Arc<Mutex<MidiConnection>>) {
+    pub fn clear_button_lights(&mut self, midiconn: &Arc<Mutex<MidiConnection>>) {
+        println!("Clearing button lights.");
+        
+        let mut mutex_guard = midiconn.try_lock().unwrap();
+
         for (address, _name) in &self.button_values {
-            midiconn
-                .lock()
-                .unwrap()
+            mutex_guard
                 .send_to_device(&[
                     match _name {
                         ButtonType::ControlChange(_) => 0b10110000,
@@ -257,87 +182,25 @@ impl ButtonMap {
         }
     }
 
-    pub fn init_control_states(
+    pub fn apply_button_lights(
         &mut self,
-        sound_system: &mut SoundSystem,
-        midiconn: Arc<Mutex<MidiConnection>>,
-    ) {
-        /* ControlName::Control01  =>  Repress Mode */
-        {
-            midiconn
-                .lock()
-                .unwrap()
-                .send_to_device(&[
-                    0b10110000,
-                    29,
-                    match sound_system.repress_mode {
-                        crate::sound_system::RepressMode::End => 127u8,
-                        crate::sound_system::RepressMode::Interrupt => 126u8,
-                    },
-                ])
-                .unwrap();
-        }
+        midiconn: &Arc<Mutex<MidiConnection>>,
+    ) -> Result<(), MyError> {
+        // let current device-mode update the lights
+        self.device_modes[self.current_mode].apply_button_lights(midiconn, &self.button_values);
+
+        Ok(())
     }
 
-    fn read_config_impl(&mut self, path: &Path, midiconn: &mut Arc<Mutex<MidiConnection>>) {
-        let mut file = File::open(path).unwrap();
-        let mut config_string = String::new();
-        file.read_to_string(&mut config_string)
-            .expect("Could not read config file.");
-
-        let action_configs: ActionConfigs =
-            ron::de::from_str(&config_string).expect("Could not deserialize SoundConfig.");
-
-        for action in action_configs.actions {
-            match action {
-                ActionConfig::SoundConfig {
-                    button,
-                    path,
-                    looping,
-                    fade_in,
-                    fade_out,
-                    gain,
-                } => self.add_action(
-                    button,
-                    Action::Sound(Sound::load(path, looping, fade_in, fade_out, gain).unwrap()),
-                    midiconn,
-                ),
-                ActionConfig::CommandConfig { button, command, args } => {
-                    self.add_action(button, Action::Command(Command::new(command, args)), midiconn)
-                }
-            }
-        }
+  
+    fn display_spotify(&self, display: &mut Push2Display) -> Result<(), MyError> {
+       
+        Ok(())
     }
 
-    pub fn read_config(&mut self, path: &str, midiconn: &mut Arc<Mutex<MidiConnection>>) {
-        let (tx, rx) = channel();
+    pub fn display(&self, display: &mut Push2Display) -> Result<(), MyError> {
+        self.device_modes[self.current_mode].display(display);
 
-        let mut watcher = watcher(tx, Duration::from_secs(2)).unwrap();
-
-        watcher
-            .watch(path, notify::RecursiveMode::NonRecursive)
-            .unwrap();
-
-        self.read_config_impl(Path::new(path), midiconn);
-
-        self.file_watcher = Some(rx);
-        self.file_watcher_intern = Some(watcher);
-    }
-
-    pub fn playing_sound_names(&self) -> Vec<(String, bool)> {
-        let mut names = vec![];
-
-        for (_button, action) in &self.button_actions {
-            match action {
-                Action::Sound(sound) => {
-                    if sound.is_playing() {
-                        names.push((sound.get_name(), sound.looped));
-                    }
-                }
-                Action::Command(_) => {}
-            }
-        }
-
-        names
+        Ok(())
     }
 }

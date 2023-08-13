@@ -1,4 +1,10 @@
-use crate::{button_map::ButtonType, sound_system::SoundSystem};
+use std::sync::{Arc, Mutex};
+
+use crate::{
+    button_map::{ButtonMap, ButtonType},
+    midi::MidiConnection,
+    sound_system::SoundSystem,
+};
 
 use self::{
     command::{Command, SingleCommandConfig},
@@ -28,6 +34,11 @@ pub enum ActionConfig {
 pub enum Action {
     Sound(Sound),
     Command(Command),
+}
+
+pub enum UpdateResult {
+    Running,
+    Stopped,
 }
 
 impl Action {
@@ -61,10 +72,36 @@ impl Action {
         }
     }
 
-    pub fn execute(&mut self, sound_system: &mut SoundSystem) -> bool {
+    pub fn execute(&mut self, sound_system: &mut Arc<Mutex<SoundSystem>>) -> bool {
         match self {
             Action::Sound(sound) => sound.play(sound_system),
             Action::Command(command) => command.execute(),
+        }
+    }
+
+    pub fn update(&mut self, sound_system: &mut Arc<Mutex<SoundSystem>>) -> UpdateResult {
+        match self {
+            Action::Sound(sound) => {
+                if !sound.update(sound_system) {
+                    return UpdateResult::Stopped;
+                } else {
+                    return UpdateResult::Running;
+                }
+            }
+            Action::Command(cmd) => {
+                if !cmd.update() {
+                    return UpdateResult::Stopped;
+                } else {
+                    return UpdateResult::Running;
+                }
+            }
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        match self {
+            Action::Sound(sound) => sound.is_running(),
+            Action::Command(cmd) => cmd.is_running(),
         }
     }
 }

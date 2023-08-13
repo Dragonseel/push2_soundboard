@@ -1,7 +1,7 @@
 use std::{
     io::{self, Read},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use rodio::Sink;
@@ -100,8 +100,21 @@ impl Sound {
         rodio::Decoder::new_looped(self.cursor()).unwrap()
     }
 
-    fn create_sink_and_append(&mut self, sound_system: &mut SoundSystem) {
-        let sink = sound_system.get_sink();
+    fn create_sink_and_append(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) {
+        let sink = {
+            let guard_res = sound_system
+            .try_lock();
+
+
+            match guard_res {
+                Ok(mut guard) => {
+                    guard.get_sink()
+                },
+                Err(error) => {
+                    panic!("Couldn't lock SoundSystem, {:?}", error);
+                },
+            }
+        };
 
         let (new_state, volume) = self.append_to_sink(&sink, sound_system);
         self.state = new_state;
@@ -110,7 +123,11 @@ impl Sound {
         self.sink = Some(sink);
     }
 
-    fn append_to_sink(&self, sink: &Sink, sound_system: &mut SoundSystem) -> (SoundState, f32) {
+    fn append_to_sink(
+        &self,
+        sink: &Sink,
+        sound_system: &Arc<Mutex<SoundSystem>>,
+    ) -> (SoundState, f32) {
         if self.looped {
             sink.append(self.looped_decoder());
         } else {
@@ -122,7 +139,13 @@ impl Sound {
 
             (SoundState::FadingIn, 0.0)
         } else {
-            sink.set_volume(sound_system.get_volume_factor() * self.gain);
+            sink.set_volume(
+                sound_system
+                    .try_lock()
+                    .expect("Couldn't lock SoundSystem")
+                    .get_volume_factor()
+                    * self.gain,
+            );
 
             (SoundState::Playing, self.gain)
         }
@@ -143,7 +166,7 @@ impl Sound {
         self.sink = None;
     }
 
-    pub fn play(&mut self, sound_system: &mut SoundSystem) -> bool {
+    pub fn play(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> bool {
         if let Some(sink) = &self.sink {
             if sink.empty() {
                 let (new_state, volume) = self.append_to_sink(sink, sound_system);
@@ -152,7 +175,13 @@ impl Sound {
 
                 return true;
             } else {
-                match sound_system.repress_mode {
+                let repress_mode = sound_system
+                .try_lock()
+                .expect("Could not lock soundsystem")
+                .repress_mode;
+
+                match repress_mode
+                {
                     crate::sound_system::RepressMode::End => {
                         if self.fade_out {
                             self.state = SoundState::FadingOut;
@@ -177,7 +206,7 @@ impl Sound {
         }
     }
 
-    pub fn update(&mut self, sound_system: &mut SoundSystem) -> bool {
+    pub fn update(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> bool {
         if let Some(sink) = &self.sink {
             if sink.empty() {
                 self.state = SoundState::Stopped;
@@ -210,7 +239,13 @@ impl Sound {
                     }
                 }
 
-                sink.set_volume(sound_system.get_volume_factor() * self.volume);
+                sink.set_volume(
+                    sound_system
+                        .try_lock()
+                        .expect("Couldn't lock SoundSystem.")
+                        .get_volume_factor()
+                        * self.volume,
+                );
             }
         } else {
             self.state = SoundState::Stopped;
@@ -225,5 +260,9 @@ impl Sound {
         } else {
             return true;
         }
+    }
+
+    pub fn is_running(&self) -> bool {
+        return self.state != SoundState::Stopped;
     }
 }

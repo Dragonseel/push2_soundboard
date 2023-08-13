@@ -63,5 +63,9 @@
     41 : Note(Pad5x0),
     42 : Note(Pad6x0),
     43 : Note(Pad7x0),
-    29 : ControlChange(Control01),
+    29 : ControlChange(Control29),
+    20 : ControlChange(Control20),
+    21 : ControlChange(Control21),
+    24 : ControlChange(Control24),
+    25 : ControlChange(Control25),
 }
