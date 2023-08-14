@@ -1,3 +1,5 @@
+use super::ActionState;
+
 #[derive(Deserialize)]
 pub struct SingleCommandConfig {}
 
@@ -16,50 +18,45 @@ impl Command {
         }
     }
 
-    pub fn execute(&mut self) -> bool {
-        println!("Testing");
+    pub fn execute(&mut self) -> ActionState {
+        if self.last_executed.is_some() {
+            return ActionState::Playing;
+        }
 
-        let output = std::process::Command::new(self.command.clone())
-            .args(self.args.clone())
-            .output()
-            .expect("Did not execute thingy.");
+        let _child = std::process::Command::new(self.command.clone())
+            .args(self.args.clone()).spawn().expect("Could not execute command.");
 
         self.last_executed = Some(std::time::Instant::now());
 
-        println!(
-            "Output: {:?}",
-            String::from_utf8(output.stdout).unwrap().trim_end()
-        );
-
-        true
+        ActionState::Started
     }
 
-    pub fn update(&mut self) -> bool {
+    pub fn update(&mut self) -> ActionState {
         if self.last_executed.is_none() {
-            return false;
+            return ActionState::None;
         }
 
         let duration = std::time::Instant::now() - self.last_executed.unwrap();
 
         if duration > std::time::Duration::from_secs(1) {
             self.last_executed = None;
-            return false;
+            return ActionState::Stopped;
         } else {
-            return true;
+            return ActionState::Playing;
         }
     }
 
-    pub fn is_running(&self) -> bool {
+    pub fn is_running(&self) -> ActionState {
         if self.last_executed.is_none() {
-            return false;
+            return ActionState::None;
         }
 
         let duration = std::time::Instant::now() - self.last_executed.unwrap();
 
         if duration > std::time::Duration::from_secs(1) {
-            return false;
+            return ActionState::Stopped;
         } else {
-            return true;
+            return ActionState::Playing;
         }
     }
 }

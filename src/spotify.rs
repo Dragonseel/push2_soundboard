@@ -182,6 +182,46 @@ impl Spotify {
         println!("Response: {artists:#?}");
     }
 
+
+    pub async fn get_current_song(&self) -> String {
+        let market = Market::Country(Country::Germany);
+        let additional_types = [AdditionalType::Track];
+        let artists = self
+            .client
+            .current_playing(Some(market), Some(&additional_types))
+            .await;
+
+        if let Ok(Some(context)) = artists {
+
+            if let Some(item) = context.item {
+                match item {
+                    rspotify::model::PlayableItem::Track(track) => {
+                        let mut output = String::new();
+
+                        for artist in track.artists {
+                            if !output.is_empty(){
+                                output += ", ";
+                            }
+                            output += &artist.name;
+                        }
+
+                        output += " - ";
+                        output += &track.name;
+
+                        return output;
+                    },
+                    rspotify::model::PlayableItem::Episode(episode) => {
+                        return "Unsupported Episode thing.".into();
+                    },
+                }
+            } else {
+                return "None".into();
+            }
+        } else {
+            return "None".into();
+        }
+    }
+
     pub async fn play(&self) {
         self.client.resume_playback(None, None).await;
     }

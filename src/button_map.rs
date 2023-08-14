@@ -2,26 +2,11 @@ use std::{
     collections::HashMap,
     fs::File,
     io::Read,
-    path::Path,
     sync::{
-        mpsc::{channel, Receiver},
         Arc, Mutex,
     },
-    time::Duration,
 };
 
-use embedded_graphics::{
-    mono_font::{iso_8859_13::FONT_10X20, MonoTextStyle},
-    pixelcolor::Bgr565,
-    prelude::*,
-    primitives::{PrimitiveStyle, Rectangle},
-    text::Text,
-};
-use notify_debouncer_full::{
-    new_debouncer,
-    notify::{ReadDirectoryChangesWatcher, RecursiveMode, Watcher},
-    DebounceEventResult, DebouncedEvent, Debouncer, FileIdMap,
-};
 use push2_display::Push2Display;
 
 #[rustfmt::skip]
@@ -57,14 +42,19 @@ mod unformatted {
 }
 
 use crate::{
-    actions::Action,
-    actions::{command::Command, sound::Sound, ActionConfig},
-    device_modes::{sound_mode::SoundMode, DeviceMode, LightAction, spotify_mode::SpotifyMode},
+    device_modes::{sound_mode::SoundMode, DeviceMode, LightAction},
     midi::MidiConnection,
     sound_system::SoundSystem,
-    spotify::Spotify,
-    MyError, DEFAULT_VOLUME, MAX_VOLUME,
+    MyError,
 };
+
+#[cfg(feature = "spotify")]
+use crate::spotify::Spotify;
+
+#[cfg(feature = "spotify")]
+use crate::device_modes::spotify_mode::SpotifyMode;
+
+
 pub use unformatted::{ButtonType, ControlName, NoteName};
 
 pub struct ButtonMap {
@@ -72,12 +62,10 @@ pub struct ButtonMap {
 
     device_modes: Vec<Box<dyn DeviceMode>>,
     current_mode: usize,
-
-    button_lights_dirty: bool,
 }
 
 impl ButtonMap {
-    pub fn new(
+    pub async fn new(
         sound_system: Arc<Mutex<SoundSystem>>,
         midiconn: &Arc<Mutex<MidiConnection>>,
     ) -> ButtonMap {
@@ -91,7 +79,9 @@ impl ButtonMap {
 
         let mut device_modes: Vec<Box<dyn DeviceMode>> = Vec::new();
         device_modes.push(Box::new(SoundMode::new(sound_system)));
-        device_modes.push(Box::new(SpotifyMode::new()));
+        
+        #[cfg(feature = "spotify")]
+        device_modes.push(Box::new(SpotifyMode::new().await));
 
         device_modes[0].apply_button_lights(midiconn, &button_values);
 
@@ -99,29 +89,31 @@ impl ButtonMap {
             button_values: button_values,
             device_modes,
             current_mode: 0_usize,
-            button_lights_dirty: true,
         }
     }
 
-    pub async fn activate_button(&mut self, address: u8, midiconn: &Arc<Mutex<MidiConnection>>) {
+    pub fn activate_button(&mut self, address: u8, midiconn: &Arc<Mutex<MidiConnection>>) {
         let mut light_action = LightAction::None;
 
         if self.button_values.contains_key(&address) {
             match &self.button_values[&address] {
                 ButtonType::ControlChange(control_name) => {
-
                     let mut control_change = false;
                     if *control_name == ControlName::Control20 {
                         self.current_mode = 0;
                         control_change = true;
-                    }
-                    else if *control_name == ControlName::Control21 {
-                        self.current_mode = 1;
+                    } else if *control_name == ControlName::Control21 {
+                        
+                        if self.device_modes.len() > 1 {
+                            self.current_mode = 1;
+                        }
+
                         control_change = true;
                     }
 
-                    light_action = self.device_modes[self.current_mode].control_press(*control_name);
-                    
+                    light_action =
+                        self.device_modes[self.current_mode].control_press(*control_name);
+
                     if control_change {
                         light_action = LightAction::ClearAndReapply;
                     }
@@ -165,7 +157,7 @@ impl ButtonMap {
 
     pub fn clear_button_lights(&mut self, midiconn: &Arc<Mutex<MidiConnection>>) {
         println!("Clearing button lights.");
-        
+
         let mut mutex_guard = midiconn.try_lock().unwrap();
 
         for (address, _name) in &self.button_values {
@@ -189,12 +181,6 @@ impl ButtonMap {
         // let current device-mode update the lights
         self.device_modes[self.current_mode].apply_button_lights(midiconn, &self.button_values);
 
-        Ok(())
-    }
-
-  
-    fn display_spotify(&self, display: &mut Push2Display) -> Result<(), MyError> {
-       
         Ok(())
     }
 

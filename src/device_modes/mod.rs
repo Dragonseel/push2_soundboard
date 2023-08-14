@@ -11,6 +11,8 @@ use crate::{
 };
 
 pub mod sound_mode;
+
+#[cfg(feature = "spotify")]
 pub mod spotify_mode;
 
 #[derive(PartialEq)]

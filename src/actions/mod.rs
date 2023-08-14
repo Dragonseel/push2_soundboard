@@ -1,14 +1,13 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    button_map::{ButtonMap, ButtonType},
-    midi::MidiConnection,
+    button_map::ButtonType,
     sound_system::SoundSystem,
 };
 
 use self::{
-    command::{Command, SingleCommandConfig},
-    sound::{SingleSoundConfig, Sound},
+    command::Command,
+    sound::Sound,
 };
 
 pub mod command;
@@ -36,9 +35,14 @@ pub enum Action {
     Command(Command),
 }
 
-pub enum UpdateResult {
-    Running,
+#[derive(PartialEq, Clone, Copy)]
+pub enum ActionState {
+    None,
     Stopped,
+    Started,
+    FadingIn,
+    FadingOut,
+    Playing,
 }
 
 impl Action {
@@ -51,7 +55,7 @@ impl Action {
                     return 56_u8;
                 }
             }
-            Action::Command(command) => {
+            Action::Command(_command) => {
                 return 72_u8;
             }
         }
@@ -66,39 +70,31 @@ impl Action {
                     return 126u8;
                 }
             }
-            Action::Command(command) => {
+            Action::Command(_command) => {
                 return 123_u8;
             }
         }
     }
 
-    pub fn execute(&mut self, sound_system: &mut Arc<Mutex<SoundSystem>>) -> bool {
+    pub fn execute(&mut self, sound_system: &mut Arc<Mutex<SoundSystem>>) -> ActionState {
         match self {
             Action::Sound(sound) => sound.play(sound_system),
             Action::Command(command) => command.execute(),
         }
     }
 
-    pub fn update(&mut self, sound_system: &mut Arc<Mutex<SoundSystem>>) -> UpdateResult {
+    pub fn update(&mut self, sound_system: &mut Arc<Mutex<SoundSystem>>) -> ActionState {
         match self {
             Action::Sound(sound) => {
-                if !sound.update(sound_system) {
-                    return UpdateResult::Stopped;
-                } else {
-                    return UpdateResult::Running;
-                }
+                return sound.update(sound_system);
             }
             Action::Command(cmd) => {
-                if !cmd.update() {
-                    return UpdateResult::Stopped;
-                } else {
-                    return UpdateResult::Running;
-                }
+                return cmd.update();
             }
         }
     }
 
-    pub fn is_running(&self) -> bool {
+    pub fn is_running(&self) -> ActionState {
         match self {
             Action::Sound(sound) => sound.is_running(),
             Action::Command(cmd) => cmd.is_running(),

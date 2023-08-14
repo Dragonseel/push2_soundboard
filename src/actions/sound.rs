@@ -6,22 +6,16 @@ use std::{
 
 use rodio::Sink;
 
-use crate::{button_map::ButtonType, sound_system::SoundSystem};
+use crate::sound_system::SoundSystem;
+
+use super::ActionState;
 
 #[derive(Deserialize)]
 pub struct SingleSoundConfig {}
 
-#[derive(PartialEq, Clone, Copy)]
-enum SoundState {
-    Stopped,
-    FadingIn,
-    FadingOut,
-    Playing,
-}
-
 pub struct Sound {
     // Runtime Data
-    state: SoundState,
+    state: ActionState,
     volume: f32,
     sink: Option<Sink>,
     sound_data: Arc<Vec<u8>>,
@@ -72,7 +66,7 @@ impl Sound {
             looped,
             fade_in,
             fade_out,
-            state: SoundState::Stopped,
+            state: ActionState::None,
             gain,
             volume: 0.0f32,
         })
@@ -100,19 +94,15 @@ impl Sound {
         rodio::Decoder::new_looped(self.cursor()).unwrap()
     }
 
-    fn create_sink_and_append(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) {
+    fn create_sink_and_append(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> ActionState {
         let sink = {
-            let guard_res = sound_system
-            .try_lock();
-
+            let guard_res = sound_system.try_lock();
 
             match guard_res {
-                Ok(mut guard) => {
-                    guard.get_sink()
-                },
+                Ok(mut guard) => guard.get_sink(),
                 Err(error) => {
                     panic!("Couldn't lock SoundSystem, {:?}", error);
-                },
+                }
             }
         };
 
@@ -121,13 +111,15 @@ impl Sound {
         self.volume = volume;
 
         self.sink = Some(sink);
+
+        self.state
     }
 
     fn append_to_sink(
         &self,
         sink: &Sink,
         sound_system: &Arc<Mutex<SoundSystem>>,
-    ) -> (SoundState, f32) {
+    ) -> (ActionState, f32) {
         if self.looped {
             sink.append(self.looped_decoder());
         } else {
@@ -137,7 +129,7 @@ impl Sound {
         if self.fade_in {
             sink.set_volume(0.0);
 
-            (SoundState::FadingIn, 0.0)
+            (ActionState::FadingIn, 0.0)
         } else {
             sink.set_volume(
                 sound_system
@@ -147,7 +139,7 @@ impl Sound {
                     * self.gain,
             );
 
-            (SoundState::Playing, self.gain)
+            (ActionState::Playing, self.gain)
         }
     }
 
@@ -166,72 +158,76 @@ impl Sound {
         self.sink = None;
     }
 
-    pub fn play(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> bool {
+    pub fn play(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> ActionState {
         if let Some(sink) = &self.sink {
             if sink.empty() {
                 let (new_state, volume) = self.append_to_sink(sink, sound_system);
                 self.state = new_state;
                 self.volume = volume;
 
-                return true;
+                return new_state;
             } else {
                 let repress_mode = sound_system
-                .try_lock()
-                .expect("Could not lock soundsystem")
-                .repress_mode;
+                    .try_lock()
+                    .expect("Could not lock soundsystem")
+                    .repress_mode;
 
-                match repress_mode
-                {
+                match repress_mode {
                     crate::sound_system::RepressMode::End => {
                         if self.fade_out {
-                            self.state = SoundState::FadingOut;
-                            return true;
+                            self.state = ActionState::FadingOut;
+                            return self.state;
                         } else {
                             sink.stop();
                             self.sink = None;
-                            return false;
+                            self.state = ActionState::Stopped;
+                            return self.state;
                         }
                     }
                     crate::sound_system::RepressMode::Interrupt => {
                         sink.stop();
                         self.sink = None;
-                        self.create_sink_and_append(sound_system);
-                        return true;
+                        return self.create_sink_and_append(sound_system);
                     }
                 }
             }
         } else {
-            self.create_sink_and_append(sound_system);
-            return true;
+            return self.create_sink_and_append(sound_system);
         }
     }
 
-    pub fn update(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> bool {
+    pub fn update(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> ActionState {
+        if self.state == ActionState::Stopped {
+            // We stopped last update, and now everything is over.
+            self.state = ActionState::None;
+            return self.state;
+        }
+
         if let Some(sink) = &self.sink {
             if sink.empty() {
-                self.state = SoundState::Stopped;
+                self.state = ActionState::Stopped;
             } else {
                 const FRAMERATE: f32 = 60.0f32;
                 const INCREASE_PER_FRAME: f32 = 1.5f32;
 
                 match self.state {
-                    SoundState::FadingIn => {
+                    ActionState::FadingIn => {
                         self.volume = f32::min(
                             self.volume + (self.gain / FRAMERATE) * INCREASE_PER_FRAME,
                             self.gain,
                         );
 
                         if self.volume >= self.gain {
-                            self.state = SoundState::Playing;
+                            self.state = ActionState::Playing;
                         }
                     }
-                    SoundState::FadingOut => {
+                    ActionState::FadingOut => {
                         self.volume = f32::max(
                             self.volume - (self.gain / FRAMERATE) * INCREASE_PER_FRAME,
                             0.0,
                         );
                         if self.volume <= 0.0 {
-                            self.state = SoundState::Stopped;
+                            self.state = ActionState::Stopped;
                         }
                     }
                     _ => {
@@ -248,21 +244,20 @@ impl Sound {
                 );
             }
         } else {
-            self.state = SoundState::Stopped;
+            // We have no sink.
+            self.state = ActionState::None;
         }
 
-        if self.sink.is_some() && self.state == SoundState::Stopped {
+        if self.sink.is_some() && self.state == ActionState::Stopped {
             // Nothing playing but still a sink
             // Take it out of option, stop and drop it.
             self.sink.take().unwrap().stop();
-
-            return false;
-        } else {
-            return true;
         }
+
+        return self.state;
     }
 
-    pub fn is_running(&self) -> bool {
-        return self.state != SoundState::Stopped;
+    pub fn is_running(&self) -> ActionState {
+        self.state
     }
 }

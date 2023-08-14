@@ -11,7 +11,14 @@ use std::{
     time::Duration,
 };
 
-use embedded_graphics::{primitives::{PrimitiveStyle, Rectangle, Primitive}, prelude::{Point, Size, RgbColor}, pixelcolor::Bgr565, Drawable, text::Text, mono_font::{MonoTextStyle, iso_8859_13::FONT_10X20}};
+use embedded_graphics::{
+    mono_font::{iso_8859_13::FONT_10X20, MonoTextStyle},
+    pixelcolor::Bgr565,
+    prelude::{Point, RgbColor, Size},
+    primitives::{Primitive, PrimitiveStyle, Rectangle},
+    text::Text,
+    Drawable,
+};
 use notify_debouncer_full::{
     new_debouncer,
     notify::{ReadDirectoryChangesWatcher, RecursiveMode, Watcher},
@@ -20,9 +27,10 @@ use notify_debouncer_full::{
 use push2_display::Push2Display;
 
 use crate::{
-    actions::{command::Command, sound::Sound, Action, ActionConfig},
+    actions::{command::Command, sound::Sound, Action, ActionConfig, ActionState},
     button_map::{ButtonType, ControlName, NoteName},
-    sound_system::SoundSystem, MyError, MAX_VOLUME, DEFAULT_VOLUME,
+    sound_system::SoundSystem,
+    MyError, DEFAULT_VOLUME, MAX_VOLUME,
 };
 
 use super::LightAction;
@@ -62,7 +70,7 @@ impl SoundMode {
     }
 
     pub fn read_config(&mut self, path: &str) {
-        let (tx, rx) = channel();
+        let (_tx, rx) = channel();
 
         // Select recommended watcher for debouncer.
         // Using a callback here, could also be a channel.
@@ -133,7 +141,6 @@ impl SoundMode {
     }
 }
 
-
 impl SoundMode {
     pub fn playing_sound_names(&self) -> Vec<(String, bool)> {
         let mut names = vec![];
@@ -148,7 +155,7 @@ impl SoundMode {
                 Action::Command(_) => {}
             }
         }
-        
+
         names
     }
 
@@ -178,8 +185,11 @@ impl SoundMode {
         .into_styled(PrimitiveStyle::with_stroke(Bgr565::WHITE, 2))
         .draw(display)?;
 
-        let volume_factor =
-            sound_system.try_lock().expect("Couldn't lock SoundSystem.").get_volume_factor() / (MAX_VOLUME as f32 / DEFAULT_VOLUME as f32);
+        let volume_factor = sound_system
+            .try_lock()
+            .expect("Couldn't lock SoundSystem.")
+            .get_volume_factor()
+            / (MAX_VOLUME as f32 / DEFAULT_VOLUME as f32);
 
         // Fill for current volume
         Rectangle::new(
@@ -343,10 +353,8 @@ impl SoundMode {
 
         SoundMode::draw_volume(&self.sound_system, display)?;
 
-        
         Ok(())
     }
-
 }
 
 impl super::DeviceMode for SoundMode {
@@ -355,16 +363,19 @@ impl super::DeviceMode for SoundMode {
             .button_actions
             .contains_key(&ButtonType::Note(note_name))
         {
-            let _playing = self
+            let playing = self
                 .button_actions
                 .get_mut(&ButtonType::Note(note_name))
                 .unwrap()
                 .execute(&mut self.sound_system);
 
-            return LightAction::Reapply; //self.button_lights_dirty
+            if playing == ActionState::FadingOut || playing == ActionState::Stopped {
+                println!("Stopping a sound.");
+            }
+            return LightAction::Reapply;
         }
 
-        return LightAction::None; //self.button_lights_dirty
+        return LightAction::None;
     }
 
     fn control_press(&mut self, control_name: ControlName) -> LightAction {
@@ -458,22 +469,28 @@ impl super::DeviceMode for SoundMode {
                 },
                 ButtonType::Note(_note_name) => {
                     if self.button_actions.contains_key(name) {
-                        if self.button_actions[name].is_running() {
-                            mutex_guard
-                                .send_to_device(&[
-                                    0b10010000,
-                                    *address,
-                                    self.button_actions[name].get_active_color(),
-                                ])
-                                .unwrap();
-                        } else {
-                            mutex_guard
-                                .send_to_device(&[
-                                    0b10010000,
-                                    *address,
-                                    self.button_actions[name].get_default_color(),
-                                ])
-                                .unwrap();
+                        match self.button_actions[name].is_running() {
+                            ActionState::None | ActionState::Stopped => {
+                                mutex_guard
+                                    .send_to_device(&[
+                                        0b10010000,
+                                        *address,
+                                        self.button_actions[name].get_default_color(),
+                                    ])
+                                    .unwrap();
+                            }
+                            ActionState::Playing
+                            | ActionState::Started
+                            | ActionState::FadingIn
+                            | ActionState::FadingOut => {
+                                mutex_guard
+                                    .send_to_device(&[
+                                        0b10010000,
+                                        *address,
+                                        self.button_actions[name].get_active_color(),
+                                    ])
+                                    .unwrap();
+                            }
                         }
                     } else {
                         mutex_guard
@@ -522,8 +539,11 @@ impl super::DeviceMode for SoundMode {
             let result = action.update(&mut self.sound_system);
 
             match result {
-                crate::actions::UpdateResult::Running => {}
-                crate::actions::UpdateResult::Stopped => {
+                ActionState::None | ActionState::Playing => {}
+                ActionState::Stopped
+                | ActionState::Started
+                | ActionState::FadingIn
+                | ActionState::FadingOut => {
                     if need_ligh_refresh == LightAction::None {
                         need_ligh_refresh = LightAction::Reapply;
                     }
@@ -531,7 +551,7 @@ impl super::DeviceMode for SoundMode {
             }
         }
 
-        return LightAction::None;
+        return need_ligh_refresh;
     }
 
     fn display(&self, display: &mut push2_display::Push2Display) {

@@ -15,8 +15,6 @@ use gameloop::{FrameAction, GameLoop, GameLoopError};
 use push2_display::*;
 
 use embedded_graphics::{pixelcolor::Bgr565, prelude::*};
-use std::io::{BufRead, BufReader};
-use std::net::TcpListener;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::{convert::Infallible, fs::File, io::Read};
@@ -29,6 +27,9 @@ mod button_map;
 mod device_modes;
 mod midi;
 mod sound_system;
+
+
+#[cfg(feature = "spotify")]
 mod spotify;
 
 #[tokio::main]
@@ -94,6 +95,8 @@ struct DeviceConfig {
     midi_out: String,
 }
 
+
+
 async fn run() -> Result<(), MyError> {
     let mut file = File::open("config/devices.ron").unwrap();
     let mut config_string = String::new();
@@ -114,18 +117,22 @@ async fn run() -> Result<(), MyError> {
 
     let mut push2midi = Arc::new(Mutex::new(push2midi));
 
-    let spotify = Arc::new(spotify::Spotify::new().await);
+
     let sound_system = Arc::new(Mutex::new(SoundSystem::new(&device_config.sound_device)));
 
     let button_mapping = Arc::new(Mutex::new(ButtonMap::new(
         Arc::clone(&sound_system),
         &push2midi,
-    )));
+    ).await));
     button_mapping
         .try_lock()
         .unwrap()
         .clear_button_lights(&push2midi);
-    button_mapping.try_lock().unwrap().apply_button_lights(&push2midi).unwrap();
+    button_mapping
+        .try_lock()
+        .unwrap()
+        .apply_button_lights(&push2midi)
+        .unwrap();
 
     let mut tray =
         TrayItem::new("Push2Soundboard", tray_item::IconSource::Resource("test")).unwrap();
@@ -152,7 +159,6 @@ async fn run() -> Result<(), MyError> {
                                     .try_lock()
                                     .unwrap()
                                     .activate_button(address, &push2midi)
-                                    .await;
                             }
                             MidiMessage::Volume(change) => {
                                 sound_system

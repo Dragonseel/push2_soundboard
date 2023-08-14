@@ -18,12 +18,14 @@ ron = "*"
 serde = "*"
 serde_derive = "*"
 notify-debouncer-full = "*"
-rspotify = {version = "*", features = ["cli"] }
-tokio = { version = "1", features = ["full"] }
-open = "*"
+tokio = { version = "1", features = ["full"]}
+rspotify = {version = "*", features = ["cli"] , optional = true}
+open = {version = "*", optional = true}
 
 [build-dependencies]
 winres = "*"
 
 [features]
+default = []
 console = []
+spotify = ["dep:rspotify", "dep:open"]
