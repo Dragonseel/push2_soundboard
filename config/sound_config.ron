@@ -1,20 +1,27 @@
-SoundConfig(
-    sounds: [
-        (
-            button: Note(Pad0x0),
-            path: "assets/testsound.mp3",
-            looping: false,
-            fade_in: false,
-            fade_out: false,
-            gain: 1.0,
+ActionConfigs(
+    actions: [
+        SoundConfig(
+                button: Note(Pad0x0),
+                path: "assets/testsound.mp3",
+                looping: false,
+                fade_in: false,
+                fade_out: false,
+                gain: 1.0,
+            
+        ),        
+        SoundConfig(
+                button: Note(Pad1x0),
+                path: "assets/testsound.wav",
+                looping: true,
+                fade_in: true,
+                fade_out: true,
+                gain: 1.0,
+            
         ),
-        (
-            button: Note(Pad1x0),
-            path: "assets/testsound.wav",
-            looping: true,
-            fade_in: true,
-            fade_out: true,
-            gain: 1.0,
-        ),
+        CommandConfig(
+            button: Note(Pad0x1),
+            command: "cmd",
+            args: ["/C", "echo hello"],
+        )
     ],
 )
