@@ -1,8 +1,11 @@
 # push2_soundboard
 
-This is a small executable program that allows to play sounds and loops via pressing buttons on the Ableton Push2 midi controller.
+A small tool to use the Ableton Push2 midi controller to create a sound control-center for mood setting.
+The main idea is to use this tool to control sound effects and music used in pen and paper roleplaying games.
 
-It allows playback of different file-types though tested is only mp3 and wav.
+It can play short sound-files on button presses, play looping sound with fade-in and out, it can run arbitrary cmd-commands on buttons.
+Also in development is the feature `spotify` which enables a spotify device-mode you can switch to at runtime. This mode currently only displays the song playing on your linked (OAuth authentification flow is used) spotify account, but further control is planned.
+
 
 ## Features
 
@@ -11,6 +14,7 @@ It allows playback of different file-types though tested is only mp3 and wav.
 - Looping
 - Per sound gain
 - hot reloaded config-file
+- cmd/shell commands fired on button-press
 
 ### General
 - Configurable device-names
@@ -18,6 +22,10 @@ It allows playback of different file-types though tested is only mp3 and wav.
 - Interrupt-Mode for repeated play (for example for the classic Airhorn sound)
 - Display shows list of playing sounds
 - Volume control
+
+### Spotify Control integration
+- OAuth authentification of your spotify account
+- Display currently playing track on Push2 display
 
 ## License
 
