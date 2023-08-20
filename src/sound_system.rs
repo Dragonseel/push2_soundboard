@@ -27,7 +27,7 @@ pub struct SoundSystem {
 impl SoundSystem {
     pub fn new<S: AsRef<str>>(device: S) -> Result<SoundSystem, MyError> {
         let default_host = rodio::cpal::default_host();
-        let mut device_list = default_host.output_devices();
+        let device_list = default_host.output_devices();
 
         let mut device_list = match device_list {
             Ok(list) => list,

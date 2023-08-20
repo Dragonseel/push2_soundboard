@@ -17,7 +17,7 @@ pub struct Spotify {
 }
 
 impl Spotify {
-    pub async fn new() -> Spotify {
+    pub async fn new() -> Result<Spotify, MyError> {
         let credentials = Credentials::new(
             "56dea31bdc754cda884e236084e20901",
             "3e21efc2285f496786acd88f4f888e65",
@@ -51,12 +51,12 @@ impl Spotify {
 
         match client_result {
             Ok(token) => {
-                Spotify::prompt_for_token(&token, &client).await;
+                Spotify::prompt_for_token(&token, &client).await?;
             }
             Err(err) => println!("{:?}", err),
         }
 
-        Spotify { client }
+        Ok(Spotify { client })
     }
 
     async fn prompt_for_token(url: &str, client: &AuthCodeSpotify) -> Result<(), MyError> {
@@ -164,20 +164,6 @@ impl Spotify {
         Ok(code)
     }
 
-    pub async fn test(&mut self) {
-        println!("Query playing");
-        //let playing =self.client.current_playing(None, Some([&AdditionalType::Track])).await.unwrap();
-
-        let market = Market::Country(Country::Germany);
-        let additional_types = [AdditionalType::Episode];
-        let artists = self
-            .client
-            .current_playing(Some(market), Some(&additional_types))
-            .await;
-
-        println!("Response: {artists:#?}");
-    }
-
     pub async fn get_current_song(&self) -> String {
         let market = Market::Country(Country::Germany);
         let additional_types = [AdditionalType::Track];
@@ -204,7 +190,7 @@ impl Spotify {
 
                         return output;
                     }
-                    rspotify::model::PlayableItem::Episode(episode) => {
+                    rspotify::model::PlayableItem::Episode(_episode) => {
                         return "Unsupported Episode thing.".into();
                     }
                 }
@@ -216,11 +202,13 @@ impl Spotify {
         }
     }
 
-    pub async fn play(&self) {
-        self.client.resume_playback(None, None).await;
+    pub async fn play(&self) -> Result<(), MyError> {
+        self.client.resume_playback(None, None).await?;
+        Ok(())
     }
 
-    pub async fn pause(&self) {
-        self.client.pause_playback(None).await;
+    pub async fn pause(&self) -> Result<(), MyError> {
+        self.client.pause_playback(None).await?;
+        Ok(())
     }
 }

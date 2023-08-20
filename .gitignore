@@ -1,1 +1,5 @@
 /target
+/assets/private
+/config/testconfig.ron
+*.asd
+test.cache

@@ -23,22 +23,23 @@ pub struct SpotifyMode {
 }
 
 impl SpotifyMode {
-    pub async fn new() -> SpotifyMode {
-        let spotify = Arc::new(spotify::Spotify::new().await);
+    pub async fn new() -> Result<SpotifyMode, MyError> {
+        let spotify = Arc::new(spotify::Spotify::new().await?);
 
+        Ok(
         SpotifyMode {
             spotify,
             last_updated: std::time::Instant::now(),
             running_query: None,
             playing_song: None,
-        }
+        })
     }
 }
 
 impl super::DeviceMode for SpotifyMode {
     fn button_press(
         &mut self,
-        note_name: crate::button_map::NoteName,
+        _note_name: crate::button_map::NoteName,
     ) -> Result<super::LightAction, MyError> {
         // Do nothing for now
         Ok(super::LightAction::None)
@@ -46,7 +47,7 @@ impl super::DeviceMode for SpotifyMode {
 
     fn control_press(
         &mut self,
-        control_name: crate::button_map::ControlName,
+        _control_name: crate::button_map::ControlName,
     ) -> Result<super::LightAction, MyError> {
         // Do nothing for now
         Ok(super::LightAction::None)
@@ -54,8 +55,8 @@ impl super::DeviceMode for SpotifyMode {
 
     fn apply_button_lights(
         &mut self,
-        midiconn: &std::sync::Arc<std::sync::Mutex<crate::midi::MidiConnection>>,
-        button_values: &std::collections::HashMap<u8, crate::button_map::ButtonType>,
+        _midiconn: &std::sync::Arc<std::sync::Mutex<crate::midi::MidiConnection>>,
+        _button_values: &std::collections::HashMap<u8, crate::button_map::ButtonType>,
     ) -> Result<(), MyError> {
         // Do nothing for now
         Ok(())

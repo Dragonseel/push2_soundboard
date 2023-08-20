@@ -48,7 +48,7 @@ pub struct SoundMode {
 }
 
 impl SoundMode {
-    pub fn new(sound_system: Arc<Mutex<SoundSystem>>) -> SoundMode {
+    pub fn new(sound_system: Arc<Mutex<SoundSystem>>) -> Result<SoundMode, MyError> {
         let mut sound_mode = SoundMode {
             button_actions: default::Default::default(),
             sound_system,
@@ -56,9 +56,9 @@ impl SoundMode {
             file_watcher_intern: None,
         };
 
-        sound_mode.read_config("config/testconfig.ron");
+        sound_mode.read_config("config/testconfig.ron")?;
 
-        sound_mode
+        Ok(sound_mode)
     }
 
     pub fn add_action(&mut self, button: ButtonType, action: Action) {
@@ -110,7 +110,7 @@ impl SoundMode {
             .cache()
             .add_root(Path::new("."), RecursiveMode::Recursive);
 
-        self.read_config_impl(Path::new(path));
+        self.read_config_impl(Path::new(path))?;
 
         self.file_watcher = Some(rx);
         self.file_watcher_intern = Some(debouncer);
@@ -542,7 +542,7 @@ impl super::DeviceMode for SoundMode {
             self.button_actions.clear();
 
             // parse new sounds
-            self.read_config_impl(&changed);
+            self.read_config_impl(&changed)?;
 
             need_ligh_refresh = LightAction::ClearAndReapply;
         }

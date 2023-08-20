@@ -147,8 +147,8 @@ async fn run() -> Result<(), MyError> {
         ButtonMap::new(Arc::clone(&sound_system), &push2midi).await?,
     ));
 
-    lock_or_return_err!(button_mapping).clear_button_lights(&push2midi);
-    lock_or_return_err!(button_mapping).apply_button_lights(&push2midi);
+    lock_or_return_err!(button_mapping).clear_button_lights(&push2midi)?;
+    lock_or_return_err!(button_mapping).apply_button_lights(&push2midi)?;
 
     let mut tray = TrayItem::new("Push2Soundboard", tray_item::IconSource::Resource("test"))
         .expect("Could not create tray icon");
@@ -181,10 +181,10 @@ async fn run() -> Result<(), MyError> {
                         }
                     }
 
-                    lock_or_return_err!(button_mapping).update(&mut push2midi);
+                    lock_or_return_err!(button_mapping).update(&mut push2midi)?;
 
                     if atomic_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                        lock_or_return_err!(button_mapping).clear_button_lights(&push2midi);
+                        lock_or_return_err!(button_mapping).clear_button_lights(&push2midi)?;
                         std::process::exit(0);
                     }
                 }

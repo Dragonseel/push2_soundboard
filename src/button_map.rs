@@ -67,7 +67,7 @@ impl ButtonMap {
 
         let mut file = match file {
             Ok(handle) => handle,
-            Err(err) => {
+            Err(_err) => {
                 return Err(MyError::ConfigFileNotFound("Button values"));
             }
         };
@@ -82,12 +82,12 @@ impl ButtonMap {
             ron::de::from_str(&config_string).expect("Could not deserialize SoundConfig.");
 
         let mut device_modes: Vec<Box<dyn DeviceMode>> = Vec::new();
-        device_modes.push(Box::new(SoundMode::new(sound_system)));
+        device_modes.push(Box::new(SoundMode::new(sound_system)?));
 
         #[cfg(feature = "spotify")]
-        device_modes.push(Box::new(SpotifyMode::new().await));
+        device_modes.push(Box::new(SpotifyMode::new().await?));
 
-        device_modes[0].apply_button_lights(midiconn, &button_values);
+        device_modes[0].apply_button_lights(midiconn, &button_values)?;
 
         Ok(ButtonMap {
             button_values: button_values,
@@ -170,11 +170,11 @@ impl ButtonMap {
         &mut self,
         midiconn: &Arc<Mutex<MidiConnection>>,
     ) -> Result<(), MyError> {
-        let mut mutex_guard = midiconn.try_lock();
+        let mutex_guard = midiconn.try_lock();
 
         let mut mutex_guard = match mutex_guard {
             Ok(value) => value,
-            Err(err) => {
+            Err(_err) => {
                 return Err(MyError::MutexError("Could not lock midi"));
             }
         };
@@ -198,13 +198,13 @@ impl ButtonMap {
         midiconn: &Arc<Mutex<MidiConnection>>,
     ) -> Result<(), MyError> {
         // let current device-mode update the lights
-        self.device_modes[self.current_mode].apply_button_lights(midiconn, &self.button_values);
+        self.device_modes[self.current_mode].apply_button_lights(midiconn, &self.button_values)?;
 
         Ok(())
     }
 
     pub fn display(&self, display: &mut Push2Display) -> Result<(), MyError> {
-        self.device_modes[self.current_mode].display(display);
+        self.device_modes[self.current_mode].display(display)?;
 
         Ok(())
     }
