@@ -45,17 +45,18 @@ impl MidiConnection {
             "Push2_Soundboard-InPort",
             move |_, message, tx| {
                 match message {
-                    [CONTROL_CHANGE, 0x4E, value] => {
-                        tx.send(MidiMessage::Volume(MidiConnection::get_endcoder_value(
+                    [CONTROL_CHANGE, 0x4E, value] => tx
+                        .send(MidiMessage::Volume(MidiConnection::get_endcoder_value(
                             value,
                         )))
-                        .unwrap();
-                    }
+                        .expect("Could not send volume message through channel"),
                     [CONTROL_CHANGE, address, value] => {
-                        tx.send(MidiMessage::Btn(*address, *value)).unwrap();
+                        tx.send(MidiMessage::Btn(*address, *value))
+                            .expect("Could not send control change message through channel.");
                     }
                     [NOTE_ON, address, value] => {
-                        tx.send(MidiMessage::Btn(*address, *value)).unwrap();
+                        tx.send(MidiMessage::Btn(*address, *value))
+                            .expect("Could not send note on message through channel");
                     }
                     _ => {
                         // println!("{}: {:X?} (len = {})", stamp, message, message.len());

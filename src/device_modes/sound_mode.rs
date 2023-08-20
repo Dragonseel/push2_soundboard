@@ -65,31 +65,43 @@ impl SoundMode {
         if !self.button_actions.contains_key(&button) {
             self.button_actions.insert(button, action);
         } else {
-            *self.button_actions.get_mut(&button).unwrap() = action;
+            *self
+                .button_actions
+                .get_mut(&button)
+                .expect("Could not get hash-map entry despite previous check.") = action;
         }
     }
 
-    pub fn read_config(&mut self, path: &str) {
+    pub fn read_config(&mut self, path: &str) -> Result<(), MyError> {
         let (_tx, rx) = channel();
 
         // Select recommended watcher for debouncer.
         // Using a callback here, could also be a channel.
-        let mut debouncer = new_debouncer(
+        let mut debouncer = match new_debouncer(
             Duration::from_secs(2),
             None,
             |result: DebounceEventResult| match result {
                 Ok(events) => events.iter().for_each(|_event| {}),
                 Err(errors) => errors.iter().for_each(|error| println!("{error:?}")),
             },
-        )
-        .unwrap();
+        ) {
+            Ok(value) => value,
+            Err(_) => return Err(MyError::FileWatcher("Could not create debouncer.")),
+        };
 
         // Add a path to be watched. All files and directories at that path and
         // below will be monitored for changes.
-        debouncer
+        match debouncer
             .watcher()
             .watch(Path::new("."), RecursiveMode::Recursive)
-            .unwrap();
+        {
+            Ok(()) => (),
+            Err(_) => {
+                return Err(MyError::FileWatcher(
+                    "Could not add watch to debounced watcher.",
+                ))
+            }
+        }
 
         // Add the same path to the file ID cache. The cache uses unique file IDs
         // provided by the file system and is used to stich together rename events
@@ -102,10 +114,15 @@ impl SoundMode {
 
         self.file_watcher = Some(rx);
         self.file_watcher_intern = Some(debouncer);
+
+        Ok(())
     }
 
-    fn read_config_impl(&mut self, path: &Path) {
-        let mut file = File::open(path).unwrap();
+    fn read_config_impl(&mut self, path: &Path) -> Result<(), MyError> {
+        let mut file = match File::open(path) {
+            Ok(val) => val,
+            Err(_) => return Err(MyError::ConfigFileNotFound("Sound Mode config")),
+        };
         let mut config_string = String::new();
         file.read_to_string(&mut config_string)
             .expect("Could not read config file.");
@@ -124,7 +141,14 @@ impl SoundMode {
                     gain,
                 } => self.add_action(
                     button,
-                    Action::Sound(Sound::load(path, looping, fade_in, fade_out, gain).unwrap()),
+                    Action::Sound({
+                        match Sound::load(path, looping, fade_in, fade_out, gain) {
+                            Ok(val) => val,
+                            Err(_) => {
+                                return Err(MyError::SoundSystemError("Could not load sound."))
+                            }
+                        }
+                    }),
                 ),
                 ActionConfig::CommandConfig {
                     button,
@@ -138,6 +162,8 @@ impl SoundMode {
                 }
             }
         }
+
+        Ok(())
     }
 }
 
@@ -358,7 +384,7 @@ impl SoundMode {
 }
 
 impl super::DeviceMode for SoundMode {
-    fn button_press(&mut self, note_name: NoteName) -> LightAction {
+    fn button_press(&mut self, note_name: NoteName) -> Result<LightAction, MyError> {
         if self
             .button_actions
             .contains_key(&ButtonType::Note(note_name))
@@ -366,19 +392,19 @@ impl super::DeviceMode for SoundMode {
             let playing = self
                 .button_actions
                 .get_mut(&ButtonType::Note(note_name))
-                .unwrap()
-                .execute(&mut self.sound_system);
+                .expect("Could not get hash-map entry despite previous check.")
+                .execute(&mut self.sound_system)?;
 
             if playing == ActionState::FadingOut || playing == ActionState::Stopped {
                 println!("Stopping a sound.");
             }
-            return LightAction::Reapply;
+            return Ok(LightAction::Reapply);
         }
 
-        return LightAction::None;
+        return Ok(LightAction::None);
     }
 
-    fn control_press(&mut self, control_name: ControlName) -> LightAction {
+    fn control_press(&mut self, control_name: ControlName) -> Result<LightAction, MyError> {
         match control_name {
             ControlName::Control29 => {
                 // Toggle Internal State
@@ -403,19 +429,19 @@ impl super::DeviceMode for SoundMode {
                     .expect("Couldn't lock SoundSystem")
                     .repress_mode = internal_state;
 
-                return LightAction::Reapply;
+                return Ok(LightAction::Reapply);
             }
             ControlName::Control20 => {
-                return LightAction::Reapply;
+                return Ok(LightAction::Reapply);
             }
             ControlName::Control21 => {
-                return LightAction::Reapply;
+                return Ok(LightAction::Reapply);
             }
             ControlName::Control24 => {
-                return LightAction::None;
+                return Ok(LightAction::None);
             }
             ControlName::Control25 => {
-                return LightAction::None;
+                return Ok(LightAction::None);
             }
         }
     }
@@ -424,7 +450,7 @@ impl super::DeviceMode for SoundMode {
         &mut self,
         midiconn: &Arc<Mutex<crate::midi::MidiConnection>>,
         button_values: &HashMap<u8, ButtonType>,
-    ) {
+    ) -> Result<(), MyError> {
         let mut mutex_guard = midiconn.try_lock().expect("Couldn't lock MidiConnection");
         let sound_guard = self
             .sound_system
@@ -435,74 +461,60 @@ impl super::DeviceMode for SoundMode {
             match name {
                 ButtonType::ControlChange(control_name) => match control_name {
                     ControlName::Control29 => {
-                        mutex_guard
-                            .send_to_device(&[
-                                0b10110000,
-                                *address,
-                                match sound_guard.repress_mode {
-                                    crate::sound_system::RepressMode::End => 127u8,
-                                    crate::sound_system::RepressMode::Interrupt => 126u8,
-                                },
-                            ])
-                            .unwrap();
+                        mutex_guard.send_to_device(&[
+                            0b10110000,
+                            *address,
+                            match sound_guard.repress_mode {
+                                crate::sound_system::RepressMode::End => 127u8,
+                                crate::sound_system::RepressMode::Interrupt => 126u8,
+                            },
+                        ])?;
                     }
                     ControlName::Control20 => {
-                        mutex_guard
-                            .send_to_device(&[0b10110000, *address, 125u8])
-                            .unwrap();
+                        mutex_guard.send_to_device(&[0b10110000, *address, 125u8])?;
                     }
                     ControlName::Control21 => {
-                        mutex_guard
-                            .send_to_device(&[0b10110000, *address, 123u8])
-                            .unwrap();
+                        mutex_guard.send_to_device(&[0b10110000, *address, 123u8])?;
                     }
                     ControlName::Control24 => {
-                        mutex_guard
-                            .send_to_device(&[0b10110000, *address, 0u8])
-                            .unwrap();
+                        mutex_guard.send_to_device(&[0b10110000, *address, 0u8])?;
                     }
                     ControlName::Control25 => {
-                        mutex_guard
-                            .send_to_device(&[0b10110000, *address, 0u8])
-                            .unwrap();
+                        mutex_guard.send_to_device(&[0b10110000, *address, 0u8])?;
                     }
                 },
                 ButtonType::Note(_note_name) => {
                     if self.button_actions.contains_key(name) {
                         match self.button_actions[name].is_running() {
                             ActionState::None | ActionState::Stopped => {
-                                mutex_guard
-                                    .send_to_device(&[
-                                        0b10010000,
-                                        *address,
-                                        self.button_actions[name].get_default_color(),
-                                    ])
-                                    .unwrap();
+                                mutex_guard.send_to_device(&[
+                                    0b10010000,
+                                    *address,
+                                    self.button_actions[name].get_default_color(),
+                                ])?;
                             }
                             ActionState::Playing
                             | ActionState::Started
                             | ActionState::FadingIn
                             | ActionState::FadingOut => {
-                                mutex_guard
-                                    .send_to_device(&[
-                                        0b10010000,
-                                        *address,
-                                        self.button_actions[name].get_active_color(),
-                                    ])
-                                    .unwrap();
+                                mutex_guard.send_to_device(&[
+                                    0b10010000,
+                                    *address,
+                                    self.button_actions[name].get_active_color(),
+                                ])?;
                             }
                         }
                     } else {
-                        mutex_guard
-                            .send_to_device(&[0b10010000, *address, 0_u8])
-                            .unwrap();
+                        mutex_guard.send_to_device(&[0b10010000, *address, 0_u8])?;
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
-    fn update(&mut self) -> LightAction {
+    fn update(&mut self) -> Result<LightAction, MyError> {
         let mut need_reload = None;
 
         let mut need_ligh_refresh = LightAction::None;
@@ -536,7 +548,7 @@ impl super::DeviceMode for SoundMode {
         }
 
         for (_btn_name, action) in &mut self.button_actions {
-            let result = action.update(&mut self.sound_system);
+            let result = action.update(&mut self.sound_system)?;
 
             match result {
                 ActionState::None | ActionState::Playing => {}
@@ -551,10 +563,12 @@ impl super::DeviceMode for SoundMode {
             }
         }
 
-        return need_ligh_refresh;
+        return Ok(need_ligh_refresh);
     }
 
-    fn display(&self, display: &mut push2_display::Push2Display) {
-        self.display_sounds(display).unwrap();
+    fn display(&self, display: &mut push2_display::Push2Display) -> Result<(), MyError> {
+        self.display_sounds(display)?;
+
+        Ok(())
     }
 }

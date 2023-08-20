@@ -1,12 +1,15 @@
 use std::{
+    collections::hash_map::IntoValues,
     io::{self, Read},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 
+use crate::lock_or_return_err;
+
 use rodio::Sink;
 
-use crate::sound_system::SoundSystem;
+use crate::{sound_system::SoundSystem, MyError};
 
 use super::ActionState;
 
@@ -86,50 +89,54 @@ impl Sound {
         })
     }
 
-    fn decoder(self: &Self) -> rodio::Decoder<io::Cursor<Sound>> {
-        rodio::Decoder::new(self.cursor()).unwrap()
+    fn decoder(self: &Self) -> Result<rodio::Decoder<io::Cursor<Sound>>, MyError> {
+        match rodio::Decoder::new(self.cursor()) {
+            Ok(val) => Ok(val),
+            Err(_) => Err(MyError::SoundSystemError("Could not create sound decoder.")),
+        }
     }
 
-    fn looped_decoder(self: &Self) -> rodio::decoder::LoopedDecoder<io::Cursor<Sound>> {
-        rodio::Decoder::new_looped(self.cursor()).unwrap()
+    fn looped_decoder(
+        self: &Self,
+    ) -> Result<rodio::decoder::LoopedDecoder<io::Cursor<Sound>>, MyError> {
+        match rodio::Decoder::new_looped(self.cursor()) {
+            Ok(val) => Ok(val),
+            Err(_) => Err(MyError::SoundSystemError(
+                "Could not create looped sound decoder.",
+            )),
+        }
     }
 
-    fn create_sink_and_append(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> ActionState {
-        let sink = {
-            let guard_res = sound_system.try_lock();
+    fn create_sink_and_append(
+        &mut self,
+        sound_system: &Arc<Mutex<SoundSystem>>,
+    ) -> Result<ActionState, MyError> {
+        let sink = lock_or_return_err!(sound_system).get_sink()?;
 
-            match guard_res {
-                Ok(mut guard) => guard.get_sink(),
-                Err(error) => {
-                    panic!("Couldn't lock SoundSystem, {:?}", error);
-                }
-            }
-        };
-
-        let (new_state, volume) = self.append_to_sink(&sink, sound_system);
+        let (new_state, volume) = self.append_to_sink(&sink, sound_system)?;
         self.state = new_state;
         self.volume = volume;
 
         self.sink = Some(sink);
 
-        self.state
+        Ok(self.state)
     }
 
     fn append_to_sink(
         &self,
         sink: &Sink,
         sound_system: &Arc<Mutex<SoundSystem>>,
-    ) -> (ActionState, f32) {
+    ) -> Result<(ActionState, f32), MyError> {
         if self.looped {
-            sink.append(self.looped_decoder());
+            sink.append(self.looped_decoder()?);
         } else {
-            sink.append(self.decoder());
+            sink.append(self.decoder()?);
         }
 
         if self.fade_in {
             sink.set_volume(0.0);
 
-            (ActionState::FadingIn, 0.0)
+            Ok((ActionState::FadingIn, 0.0))
         } else {
             sink.set_volume(
                 sound_system
@@ -139,7 +146,7 @@ impl Sound {
                     * self.gain,
             );
 
-            (ActionState::Playing, self.gain)
+            Ok((ActionState::Playing, self.gain))
         }
     }
 
@@ -158,14 +165,14 @@ impl Sound {
         self.sink = None;
     }
 
-    pub fn play(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> ActionState {
+    pub fn play(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> Result<ActionState, MyError> {
         if let Some(sink) = &self.sink {
             if sink.empty() {
-                let (new_state, volume) = self.append_to_sink(sink, sound_system);
+                let (new_state, volume) = self.append_to_sink(sink, sound_system)?;
                 self.state = new_state;
                 self.volume = volume;
 
-                return new_state;
+                return Ok(new_state);
             } else {
                 let repress_mode = sound_system
                     .try_lock()
@@ -176,12 +183,12 @@ impl Sound {
                     crate::sound_system::RepressMode::End => {
                         if self.fade_out {
                             self.state = ActionState::FadingOut;
-                            return self.state;
+                            return Ok(self.state);
                         } else {
                             sink.stop();
                             self.sink = None;
                             self.state = ActionState::Stopped;
-                            return self.state;
+                            return Ok(self.state);
                         }
                     }
                     crate::sound_system::RepressMode::Interrupt => {
@@ -196,11 +203,14 @@ impl Sound {
         }
     }
 
-    pub fn update(&mut self, sound_system: &Arc<Mutex<SoundSystem>>) -> ActionState {
+    pub fn update(
+        &mut self,
+        sound_system: &Arc<Mutex<SoundSystem>>,
+    ) -> Result<ActionState, MyError> {
         if self.state == ActionState::Stopped {
             // We stopped last update, and now everything is over.
             self.state = ActionState::None;
-            return self.state;
+            return Ok(self.state);
         }
 
         if let Some(sink) = &self.sink {
@@ -236,11 +246,7 @@ impl Sound {
                 }
 
                 sink.set_volume(
-                    sound_system
-                        .try_lock()
-                        .expect("Couldn't lock SoundSystem.")
-                        .get_volume_factor()
-                        * self.volume,
+                    lock_or_return_err!(sound_system).get_volume_factor() * self.volume,
                 );
             }
         } else {
@@ -248,13 +254,15 @@ impl Sound {
             self.state = ActionState::None;
         }
 
-        if self.sink.is_some() && self.state == ActionState::Stopped {
+        if self.state == ActionState::Stopped {
             // Nothing playing but still a sink
             // Take it out of option, stop and drop it.
-            self.sink.take().unwrap().stop();
+            if let Some(sink) = self.sink.take() {
+                sink.stop();
+            }
         }
 
-        return self.state;
+        return Ok(self.state);
     }
 
     pub fn is_running(&self) -> ActionState {

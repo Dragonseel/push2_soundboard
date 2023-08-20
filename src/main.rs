@@ -28,7 +28,6 @@ mod device_modes;
 mod midi;
 mod sound_system;
 
-
 #[cfg(feature = "spotify")]
 mod spotify;
 
@@ -45,11 +44,29 @@ extern crate serde_derive;
 
 #[derive(Error, Debug)]
 pub enum MyError {
+    #[error("Config file not found")]
+    ConfigFileNotFound(&'static str),
+
+    #[error("Config file read error")]
+    ConfigFileReadError,
+
     #[error("Ableton Push 2 Midi In not found")]
     NoMidiInFound,
 
     #[error("Ableton Push 2 Midi Out not found")]
     NoMidiOutFound,
+
+    #[error("System mutex could not be locked")]
+    MutexError(&'static str),
+
+    #[error("SoundSystem error")]
+    SoundSystemError(&'static str),
+
+    #[error("FileWatcher error")]
+    FileWatcher(&'static str),
+
+    #[error(transparent)]
+    SpotifyError(#[from] rspotify::ClientError),
 
     /// Represents all other cases of `std::io::Error`.
     #[error(transparent)]
@@ -95,10 +112,21 @@ struct DeviceConfig {
     midi_out: String,
 }
 
-
+#[macro_export]
+macro_rules! lock_or_return_err {
+    ($mutex:ident) => {{
+        let guard_res = $mutex.try_lock();
+        match guard_res {
+            Ok(guard) => guard,
+            Err(_error) => {
+                return Err(MyError::MutexError(stringify!($mutex)));
+            }
+        }
+    }};
+}
 
 async fn run() -> Result<(), MyError> {
-    let mut file = File::open("config/devices.ron").unwrap();
+    let mut file = File::open("config/devices.ron")?;
     let mut config_string = String::new();
     file.read_to_string(&mut config_string)
         .expect("Could not read config file.");
@@ -108,35 +136,24 @@ async fn run() -> Result<(), MyError> {
 
     let mut display = Push2Display::new()?;
 
-    println!("Created display.");
-
     let (push2midi, receiver) =
         MidiConnection::new(&device_config.midi_in, &device_config.midi_out)?;
 
-    println!("Created midi.");
-
     let mut push2midi = Arc::new(Mutex::new(push2midi));
 
+    let sound_system = Arc::new(Mutex::new(SoundSystem::new(&device_config.sound_device)?));
 
-    let sound_system = Arc::new(Mutex::new(SoundSystem::new(&device_config.sound_device)));
+    let button_mapping = Arc::new(Mutex::new(
+        ButtonMap::new(Arc::clone(&sound_system), &push2midi).await?,
+    ));
 
-    let button_mapping = Arc::new(Mutex::new(ButtonMap::new(
-        Arc::clone(&sound_system),
-        &push2midi,
-    ).await));
-    button_mapping
-        .try_lock()
-        .unwrap()
-        .clear_button_lights(&push2midi);
-    button_mapping
-        .try_lock()
-        .unwrap()
-        .apply_button_lights(&push2midi)
-        .unwrap();
+    lock_or_return_err!(button_mapping).clear_button_lights(&push2midi);
+    lock_or_return_err!(button_mapping).apply_button_lights(&push2midi);
 
-    let mut tray =
-        TrayItem::new("Push2Soundboard", tray_item::IconSource::Resource("test")).unwrap();
-    tray.add_label("Soundboard").unwrap();
+    let mut tray = TrayItem::new("Push2Soundboard", tray_item::IconSource::Resource("test"))
+        .expect("Could not create tray icon");
+    tray.add_label("Soundboard")
+        .expect("Could not add label to tray icon.");
 
     let atomic_flag: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
@@ -145,7 +162,7 @@ async fn run() -> Result<(), MyError> {
     tray.add_menu_item("Quit", move || {
         closure_atomic_flag.store(true, std::sync::atomic::Ordering::SeqCst);
     })
-    .unwrap();
+    .expect("Could not create the tray quit menu entry.");
 
     let game_loop = GameLoop::new(60, 5)?;
     loop {
@@ -155,27 +172,19 @@ async fn run() -> Result<(), MyError> {
                     while let Ok(msg) = receiver.try_recv() {
                         match msg {
                             MidiMessage::Btn(address, _value) => {
-                                button_mapping
-                                    .try_lock()
-                                    .unwrap()
-                                    .activate_button(address, &push2midi)
+                                lock_or_return_err!(button_mapping)
+                                    .activate_button(address, &push2midi)?
                             }
                             MidiMessage::Volume(change) => {
-                                sound_system
-                                    .try_lock()
-                                    .expect("Couldn't lock SoundSystem.")
-                                    .change_volume(change);
+                                lock_or_return_err!(sound_system).change_volume(change)
                             }
                         }
                     }
 
-                    button_mapping.try_lock().unwrap().update(&mut push2midi);
+                    lock_or_return_err!(button_mapping).update(&mut push2midi);
 
                     if atomic_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                        button_mapping
-                            .try_lock()
-                            .unwrap()
-                            .clear_button_lights(&push2midi);
+                        lock_or_return_err!(button_mapping).clear_button_lights(&push2midi);
                         std::process::exit(0);
                     }
                 }
@@ -185,7 +194,7 @@ async fn run() -> Result<(), MyError> {
                 } => {
                     display.clear(Bgr565::BLACK)?;
 
-                    button_mapping.try_lock().unwrap().display(&mut display)?;
+                    lock_or_return_err!(button_mapping).display(&mut display)?;
 
                     display.flush()?;
                 }

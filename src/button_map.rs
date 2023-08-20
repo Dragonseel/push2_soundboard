@@ -2,9 +2,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::Read,
-    sync::{
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 
 use push2_display::Push2Display;
@@ -49,11 +47,7 @@ use crate::{
 };
 
 #[cfg(feature = "spotify")]
-use crate::spotify::Spotify;
-
-#[cfg(feature = "spotify")]
 use crate::device_modes::spotify_mode::SpotifyMode;
-
 
 pub use unformatted::{ButtonType, ControlName, NoteName};
 
@@ -68,31 +62,45 @@ impl ButtonMap {
     pub async fn new(
         sound_system: Arc<Mutex<SoundSystem>>,
         midiconn: &Arc<Mutex<MidiConnection>>,
-    ) -> ButtonMap {
-        let mut file = File::open("config/buttonvalues.ron").unwrap();
+    ) -> Result<ButtonMap, MyError> {
+        let file = File::open("config/buttonvalues.ron");
+
+        let mut file = match file {
+            Ok(handle) => handle,
+            Err(err) => {
+                return Err(MyError::ConfigFileNotFound("Button values"));
+            }
+        };
+
         let mut config_string = String::new();
-        file.read_to_string(&mut config_string)
-            .expect("Could not read config file.");
+
+        if file.read_to_string(&mut config_string).is_err() {
+            return Err(MyError::ConfigFileReadError);
+        }
 
         let button_values: HashMap<u8, ButtonType> =
             ron::de::from_str(&config_string).expect("Could not deserialize SoundConfig.");
 
         let mut device_modes: Vec<Box<dyn DeviceMode>> = Vec::new();
         device_modes.push(Box::new(SoundMode::new(sound_system)));
-        
+
         #[cfg(feature = "spotify")]
         device_modes.push(Box::new(SpotifyMode::new().await));
 
         device_modes[0].apply_button_lights(midiconn, &button_values);
 
-        ButtonMap {
+        Ok(ButtonMap {
             button_values: button_values,
             device_modes,
             current_mode: 0_usize,
-        }
+        })
     }
 
-    pub fn activate_button(&mut self, address: u8, midiconn: &Arc<Mutex<MidiConnection>>) {
+    pub fn activate_button(
+        &mut self,
+        address: u8,
+        midiconn: &Arc<Mutex<MidiConnection>>,
+    ) -> Result<(), MyError> {
         let mut light_action = LightAction::None;
 
         if self.button_values.contains_key(&address) {
@@ -103,7 +111,6 @@ impl ButtonMap {
                         self.current_mode = 0;
                         control_change = true;
                     } else if *control_name == ControlName::Control21 {
-                        
                         if self.device_modes.len() > 1 {
                             self.current_mode = 1;
                         }
@@ -112,14 +119,14 @@ impl ButtonMap {
                     }
 
                     light_action =
-                        self.device_modes[self.current_mode].control_press(*control_name);
+                        self.device_modes[self.current_mode].control_press(*control_name)?;
 
                     if control_change {
                         light_action = LightAction::ClearAndReapply;
                     }
                 }
                 ButtonType::Note(note_name) => {
-                    light_action = self.device_modes[self.current_mode].button_press(*note_name)
+                    light_action = self.device_modes[self.current_mode].button_press(*note_name)?
                 }
             }
         }
@@ -128,50 +135,62 @@ impl ButtonMap {
             LightAction::None => {}
             LightAction::Reapply => {
                 self.device_modes[self.current_mode]
-                    .apply_button_lights(midiconn, &self.button_values);
+                    .apply_button_lights(midiconn, &self.button_values)?;
             }
             LightAction::ClearAndReapply => {
-                self.clear_button_lights(midiconn);
+                self.clear_button_lights(midiconn)?;
                 self.device_modes[self.current_mode]
-                    .apply_button_lights(midiconn, &self.button_values);
+                    .apply_button_lights(midiconn, &self.button_values)?;
             }
         }
+
+        Ok(())
     }
 
-    pub fn update(&mut self, midiconn: &mut Arc<Mutex<MidiConnection>>) {
-        let light_action: LightAction = self.device_modes[self.current_mode].update();
+    pub fn update(&mut self, midiconn: &mut Arc<Mutex<MidiConnection>>) -> Result<(), MyError> {
+        let light_action: LightAction = self.device_modes[self.current_mode].update()?;
 
         match light_action {
             LightAction::None => {}
             LightAction::Reapply => {
                 self.device_modes[self.current_mode]
-                    .apply_button_lights(midiconn, &self.button_values);
+                    .apply_button_lights(midiconn, &self.button_values)?;
             }
             LightAction::ClearAndReapply => {
-                self.clear_button_lights(midiconn);
+                self.clear_button_lights(midiconn)?;
                 self.device_modes[self.current_mode]
-                    .apply_button_lights(midiconn, &self.button_values);
+                    .apply_button_lights(midiconn, &self.button_values)?;
             }
         }
+
+        Ok(())
     }
 
-    pub fn clear_button_lights(&mut self, midiconn: &Arc<Mutex<MidiConnection>>) {
-        println!("Clearing button lights.");
+    pub fn clear_button_lights(
+        &mut self,
+        midiconn: &Arc<Mutex<MidiConnection>>,
+    ) -> Result<(), MyError> {
+        let mut mutex_guard = midiconn.try_lock();
 
-        let mut mutex_guard = midiconn.try_lock().unwrap();
+        let mut mutex_guard = match mutex_guard {
+            Ok(value) => value,
+            Err(err) => {
+                return Err(MyError::MutexError("Could not lock midi"));
+            }
+        };
 
         for (address, _name) in &self.button_values {
-            mutex_guard
-                .send_to_device(&[
-                    match _name {
-                        ButtonType::ControlChange(_) => 0b10110000,
-                        ButtonType::Note(_) => 0b10010000,
-                    },
-                    *address,
-                    0u8,
-                ])
-                .unwrap();
+            mutex_guard.send_to_device(&[
+                match _name {
+                    ButtonType::ControlChange(_) => 0b10110000,
+                    ButtonType::Note(_) => 0b10010000,
+                },
+                *address,
+                0u8,
+            ])?
         }
+
+        Ok(())
     }
 
     pub fn apply_button_lights(

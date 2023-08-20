@@ -1,14 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{
-    button_map::ButtonType,
-    sound_system::SoundSystem,
-};
+use crate::{button_map::ButtonType, sound_system::SoundSystem, MyError};
 
-use self::{
-    command::Command,
-    sound::Sound,
-};
+use self::{command::Command, sound::Sound};
 
 pub mod command;
 pub mod sound;
@@ -76,14 +70,20 @@ impl Action {
         }
     }
 
-    pub fn execute(&mut self, sound_system: &mut Arc<Mutex<SoundSystem>>) -> ActionState {
+    pub fn execute(
+        &mut self,
+        sound_system: &mut Arc<Mutex<SoundSystem>>,
+    ) -> Result<ActionState, MyError> {
         match self {
             Action::Sound(sound) => sound.play(sound_system),
             Action::Command(command) => command.execute(),
         }
     }
 
-    pub fn update(&mut self, sound_system: &mut Arc<Mutex<SoundSystem>>) -> ActionState {
+    pub fn update(
+        &mut self,
+        sound_system: &mut Arc<Mutex<SoundSystem>>,
+    ) -> Result<ActionState, MyError> {
         match self {
             Action::Sound(sound) => {
                 return sound.update(sound_system);

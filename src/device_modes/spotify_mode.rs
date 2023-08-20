@@ -9,7 +9,10 @@ use embedded_graphics::{
 };
 use tokio::runtime::Handle;
 
-use crate::spotify::{self, Spotify};
+use crate::{
+    spotify::{self, Spotify},
+    MyError,
+};
 
 pub struct SpotifyMode {
     spotify: Arc<Spotify>,
@@ -22,75 +25,93 @@ pub struct SpotifyMode {
 impl SpotifyMode {
     pub async fn new() -> SpotifyMode {
         let spotify = Arc::new(spotify::Spotify::new().await);
-        
-        SpotifyMode {spotify, last_updated: std::time::Instant::now(), running_query: None, playing_song: None}
+
+        SpotifyMode {
+            spotify,
+            last_updated: std::time::Instant::now(),
+            running_query: None,
+            playing_song: None,
+        }
     }
 }
 
 impl super::DeviceMode for SpotifyMode {
-    fn button_press(&mut self, note_name: crate::button_map::NoteName) -> super::LightAction {
+    fn button_press(
+        &mut self,
+        note_name: crate::button_map::NoteName,
+    ) -> Result<super::LightAction, MyError> {
         // Do nothing for now
-        super::LightAction::None
+        Ok(super::LightAction::None)
     }
 
     fn control_press(
         &mut self,
         control_name: crate::button_map::ControlName,
-    ) -> super::LightAction {
+    ) -> Result<super::LightAction, MyError> {
         // Do nothing for now
-        super::LightAction::None
+        Ok(super::LightAction::None)
     }
 
     fn apply_button_lights(
         &mut self,
         midiconn: &std::sync::Arc<std::sync::Mutex<crate::midi::MidiConnection>>,
         button_values: &std::collections::HashMap<u8, crate::button_map::ButtonType>,
-    ) {
+    ) -> Result<(), MyError> {
         // Do nothing for now
+        Ok(())
     }
 
-    fn update(&mut self) -> super::LightAction {
+    fn update(&mut self) -> Result<super::LightAction, MyError> {
+        if let Some(true) = self
+            .running_query
+            .as_ref()
+            .and_then(|handle| Some(handle.is_finished()))
+        {
+            let handle_inner = self
+                .running_query
+                .take()
+                .expect("Could not take option, despite previous check.");
 
+            let playing_song = Arc::new(Mutex::new(String::new()));
+            let playing_song_clone = Arc::clone(&playing_song);
+
+            tokio::task::block_in_place(|| {
+                Handle::current().block_on(async move {
+                    // do something async
+                    *playing_song_clone
+                        .lock()
+                        .expect("Thread could not lock playing song.") = handle_inner
+                        .await
+                        .expect("Could not join spotify query thread.");
+                });
+            });
+
+            self.playing_song = Some(
+                playing_song
+                    .lock()
+                    .expect("Could not lock playing song.")
+                    .clone(),
+            );
+        }
 
         if let Some(handle) = &self.running_query {
-            if handle.is_finished() {
-                let handle_inner = self.running_query.take().unwrap();
-               
-
-                let playing_song = Arc::new(Mutex::new(String::new()));
-                let playing_song_clone = Arc::clone(&playing_song);
-
-                tokio::task::block_in_place(|| {
-                         Handle::current().block_on(async move {
-                             // do something async
-                             *playing_song_clone.lock().expect("well.") = handle_inner.await.unwrap();
-                         });
-                     });
-
-                self.playing_song = Some(playing_song.lock().unwrap().clone());
-             
-            }
+            if handle.is_finished() {}
         }
 
         if (std::time::Instant::now() - self.last_updated) > std::time::Duration::from_secs(5) {
-
             let async_spotify = Arc::clone(&self.spotify);
 
-            let handle = 
-            tokio::spawn(async move {
-                async_spotify.get_current_song().await
-            });
+            let handle = tokio::spawn(async move { async_spotify.get_current_song().await });
 
             self.running_query = Some(handle);
 
             self.last_updated = std::time::Instant::now();
         }
 
-        super::LightAction::None
+        Ok(super::LightAction::None)
     }
 
-    fn display(&self, display: &mut push2_display::Push2Display) {
-       
+    fn display(&self, display: &mut push2_display::Push2Display) -> Result<(), MyError> {
         if let Some(song) = &self.playing_song {
             Text::new(
                 song,
@@ -98,7 +119,7 @@ impl super::DeviceMode for SpotifyMode {
                 MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
             )
             .draw(display)
-            .unwrap();
+            .expect("Infallible");
         } else {
             Text::new(
                 "No song updated",
@@ -106,8 +127,9 @@ impl super::DeviceMode for SpotifyMode {
                 MonoTextStyle::new(&FONT_10X20, Bgr565::WHITE),
             )
             .draw(display)
-            .unwrap();
+            .expect("Infallible");
         }
-        
+
+        Ok(())
     }
 }

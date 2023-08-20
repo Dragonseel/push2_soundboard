@@ -10,6 +10,8 @@ use rspotify::{
     scopes, AuthCodeSpotify, Config, Credentials, OAuth,
 };
 
+use crate::MyError;
+
 pub struct Spotify {
     client: AuthCodeSpotify,
 }
@@ -57,46 +59,58 @@ impl Spotify {
         Spotify { client }
     }
 
-    async fn prompt_for_token(url: &str, client: &AuthCodeSpotify) {
+    async fn prompt_for_token(url: &str, client: &AuthCodeSpotify) -> Result<(), MyError> {
         match client.read_token_cache(true).await {
             Ok(Some(new_token)) => {
                 let expired = new_token.is_expired();
 
                 // Load token into client regardless of whether it's expired o
                 // not, since it will be refreshed later anyway.
-                *client.get_token().lock().await.unwrap() = Some(new_token);
+                *{
+                    match client.get_token().lock().await {
+                        Ok(val) => val,
+                        Err(_) => return Err(MyError::MutexError("Spotify Client")),
+                    }
+                } = Some(new_token);
 
                 if expired {
                     // Ensure that we actually got a token from the refetch
-                    match client.refetch_token().await.unwrap() {
+                    match client.refetch_token().await? {
                         Some(refreshed_token) => {
                             println!("Successfully refreshed expired token from token cache");
-                            *client.get_token().lock().await.unwrap() = Some(refreshed_token)
+                            *{
+                                match client.get_token().lock().await {
+                                    Ok(val) => val,
+                                    Err(_) => return Err(MyError::MutexError("Spotify Client")),
+                                }
+                            } = Some(refreshed_token)
                         }
                         // If not, prompt the user for it
                         None => {
                             println!("Unable to refresh expired token from token cache");
                             let code =
-                                Spotify::get_code_from_user(url, &client.get_oauth().state).await;
-                            client.request_token(&code).await.unwrap();
+                                Spotify::get_code_from_user(url, &client.get_oauth().state).await?;
+                            client.request_token(&code).await?;
                         }
                     }
                 }
             }
             // Otherwise following the usual procedure to get the token.
             _ => {
-                let code = Spotify::get_code_from_user(url, &client.get_oauth().state).await;
-                client.request_token(&code).await.unwrap();
+                let code = Spotify::get_code_from_user(url, &client.get_oauth().state).await?;
+                client.request_token(&code).await?;
             }
         }
 
-        client.write_token_cache().await.unwrap();
+        client.write_token_cache().await?;
+
+        Ok(())
     }
 
-    pub async fn get_code_from_user(url: &str, expected_state: &str) -> String {
+    pub async fn get_code_from_user(url: &str, expected_state: &str) -> Result<String, MyError> {
         open::that(url).expect("Could not open browser");
 
-        let tcp_listener = TcpListener::bind("127.0.0.1:8888").unwrap();
+        let tcp_listener = TcpListener::bind("127.0.0.1:8888")?;
 
         let mut code = String::new();
         let mut state = String::new();
@@ -105,7 +119,7 @@ impl Spotify {
             let buf_reader = BufReader::new(&mut stream);
             let http_request: Vec<_> = buf_reader
                 .lines()
-                .map(|result| result.unwrap())
+                .map(|result| result.expect("Result of SpotifyRequest was error."))
                 .take_while(|line| !line.is_empty())
                 .collect();
 
@@ -138,7 +152,7 @@ impl Spotify {
 
             let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
 
-            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(response.as_bytes())?;
         }
 
         // Making sure the state is the same
@@ -147,25 +161,7 @@ impl Spotify {
             println!("Request state doesn't match the callback state");
         }
 
-        code
-    }
-
-    pub async fn step(&mut self) {
-        let mut token = String::new();
-        let token_size = std::io::stdin().read_line(&mut token).unwrap();
-        println!("Token: {:?}", token);
-
-        let code = self.client.parse_response_code(&token);
-        println!("Got Code.");
-
-        match code {
-            Some(info) => {
-                println!("Info: {:?}", info);
-                let refresh_token = self.client.refresh_token().await.unwrap();
-                println!("Got refresh token. {:?}", refresh_token);
-            }
-            None => println!("No refresh token."),
-        }
+        Ok(code)
     }
 
     pub async fn test(&mut self) {
@@ -182,7 +178,6 @@ impl Spotify {
         println!("Response: {artists:#?}");
     }
 
-
     pub async fn get_current_song(&self) -> String {
         let market = Market::Country(Country::Germany);
         let additional_types = [AdditionalType::Track];
@@ -192,14 +187,13 @@ impl Spotify {
             .await;
 
         if let Ok(Some(context)) = artists {
-
             if let Some(item) = context.item {
                 match item {
                     rspotify::model::PlayableItem::Track(track) => {
                         let mut output = String::new();
 
                         for artist in track.artists {
-                            if !output.is_empty(){
+                            if !output.is_empty() {
                                 output += ", ";
                             }
                             output += &artist.name;
@@ -209,10 +203,10 @@ impl Spotify {
                         output += &track.name;
 
                         return output;
-                    },
+                    }
                     rspotify::model::PlayableItem::Episode(episode) => {
                         return "Unsupported Episode thing.".into();
-                    },
+                    }
                 }
             } else {
                 return "None".into();

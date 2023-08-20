@@ -1,3 +1,5 @@
+use crate::MyError;
+
 use super::ActionState;
 
 #[derive(Deserialize)]
@@ -18,45 +20,47 @@ impl Command {
         }
     }
 
-    pub fn execute(&mut self) -> ActionState {
+    pub fn execute(&mut self) -> Result<ActionState, MyError> {
         if self.last_executed.is_some() {
-            return ActionState::Playing;
+            return Ok(ActionState::Playing);
         }
 
         let _child = std::process::Command::new(self.command.clone())
-            .args(self.args.clone()).spawn().expect("Could not execute command.");
+            .args(self.args.clone())
+            .spawn()
+            .expect("Could not execute command.");
 
         self.last_executed = Some(std::time::Instant::now());
 
-        ActionState::Started
+        Ok(ActionState::Started)
     }
 
-    pub fn update(&mut self) -> ActionState {
-        if self.last_executed.is_none() {
-            return ActionState::None;
-        }
+    pub fn update(&mut self) -> Result<ActionState, MyError> {
+        if let Some(last_executed) = self.last_executed {
+            let duration = std::time::Instant::now() - last_executed;
 
-        let duration = std::time::Instant::now() - self.last_executed.unwrap();
-
-        if duration > std::time::Duration::from_secs(1) {
-            self.last_executed = None;
-            return ActionState::Stopped;
+            if duration > std::time::Duration::from_secs(1) {
+                self.last_executed = None;
+                return Ok(ActionState::Stopped);
+            } else {
+                return Ok(ActionState::Playing);
+            }
         } else {
-            return ActionState::Playing;
+            return Ok(ActionState::None);
         }
     }
 
     pub fn is_running(&self) -> ActionState {
-        if self.last_executed.is_none() {
-            return ActionState::None;
-        }
+        if let Some(last_executed) = self.last_executed {
+            let duration = std::time::Instant::now() - last_executed;
 
-        let duration = std::time::Instant::now() - self.last_executed.unwrap();
-
-        if duration > std::time::Duration::from_secs(1) {
-            return ActionState::Stopped;
+            if duration > std::time::Duration::from_secs(1) {
+                return ActionState::Stopped;
+            } else {
+                return ActionState::Playing;
+            }
         } else {
-            return ActionState::Playing;
+            return ActionState::None;
         }
     }
 }
