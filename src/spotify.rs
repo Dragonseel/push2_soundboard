@@ -7,7 +7,7 @@ use std::{
 use rspotify::{
     model::{AdditionalType, Country, Market},
     prelude::*,
-    scopes, AuthCodeSpotify, Config, Credentials, OAuth,
+    scopes, AuthCodeSpotify, ClientError, Config, Credentials, OAuth,
 };
 
 use crate::MyError;
@@ -17,7 +17,7 @@ pub struct Spotify {
 }
 
 impl Spotify {
-    pub async fn new() -> Result<Spotify, MyError> {
+    pub fn new() -> Result<Spotify, MyError> {
         let credentials = Credentials::new(
             "56dea31bdc754cda884e236084e20901",
             "3e21efc2285f496786acd88f4f888e65",
@@ -51,7 +51,7 @@ impl Spotify {
 
         match client_result {
             Ok(token) => {
-                Spotify::prompt_for_token(&token, &client).await?;
+                Spotify::prompt_for_token(&token, &client)?;
             }
             Err(err) => println!("{:?}", err),
         }
@@ -59,15 +59,15 @@ impl Spotify {
         Ok(Spotify { client })
     }
 
-    async fn prompt_for_token(url: &str, client: &AuthCodeSpotify) -> Result<(), MyError> {
-        match client.read_token_cache(true).await {
+    fn prompt_for_token(url: &str, client: &AuthCodeSpotify) -> Result<(), MyError> {
+        match client.read_token_cache(true) {
             Ok(Some(new_token)) => {
                 let expired = new_token.is_expired();
 
                 // Load token into client regardless of whether it's expired o
                 // not, since it will be refreshed later anyway.
                 *{
-                    match client.get_token().lock().await {
+                    match client.get_token().lock() {
                         Ok(val) => val,
                         Err(_) => return Err(MyError::MutexError("Spotify Client")),
                     }
@@ -75,11 +75,11 @@ impl Spotify {
 
                 if expired {
                     // Ensure that we actually got a token from the refetch
-                    match client.refetch_token().await? {
+                    match client.refetch_token()? {
                         Some(refreshed_token) => {
                             println!("Successfully refreshed expired token from token cache");
                             *{
-                                match client.get_token().lock().await {
+                                match client.get_token().lock() {
                                     Ok(val) => val,
                                     Err(_) => return Err(MyError::MutexError("Spotify Client")),
                                 }
@@ -88,26 +88,25 @@ impl Spotify {
                         // If not, prompt the user for it
                         None => {
                             println!("Unable to refresh expired token from token cache");
-                            let code =
-                                Spotify::get_code_from_user(url, &client.get_oauth().state).await?;
-                            client.request_token(&code).await?;
+                            let code = Spotify::get_code_from_user(url, &client.get_oauth().state)?;
+                            client.request_token(&code)?;
                         }
                     }
                 }
             }
             // Otherwise following the usual procedure to get the token.
             _ => {
-                let code = Spotify::get_code_from_user(url, &client.get_oauth().state).await?;
-                client.request_token(&code).await?;
+                let code = Spotify::get_code_from_user(url, &client.get_oauth().state)?;
+                client.request_token(&code)?;
             }
         }
 
-        client.write_token_cache().await?;
+        client.write_token_cache()?;
 
         Ok(())
     }
 
-    pub async fn get_code_from_user(url: &str, expected_state: &str) -> Result<String, MyError> {
+    pub fn get_code_from_user(url: &str, expected_state: &str) -> Result<String, MyError> {
         open::that(url).expect("Could not open browser");
 
         let tcp_listener = TcpListener::bind("127.0.0.1:8888")?;
@@ -164,13 +163,12 @@ impl Spotify {
         Ok(code)
     }
 
-    pub async fn get_current_song(&self) -> String {
+    pub fn get_current_song(&self) -> String {
         let market = Market::Country(Country::Germany);
         let additional_types = [AdditionalType::Track];
         let artists = self
             .client
-            .current_playing(Some(market), Some(&additional_types))
-            .await;
+            .current_playing(Some(market), Some(&additional_types));
 
         if let Ok(Some(context)) = artists {
             if let Some(item) = context.item {
@@ -202,13 +200,102 @@ impl Spotify {
         }
     }
 
-    pub async fn play(&self) -> Result<(), MyError> {
-        self.client.resume_playback(None, None).await?;
-        Ok(())
+    pub fn play(&self) -> Result<(), MyError> {
+        let result = self.client.resume_playback(None, None);
+
+        // We want to filter the 403 status-code response out, it is technically an error,
+        // but only because we wanted to pause on a already paused song.
+        match result {
+            Ok(_) => return Ok(()),
+            Err(error) => match error {
+                ClientError::ParseJson(_) => {
+                    return Err(MyError::SpotifyDetailedError("ParseJson"))
+                }
+                ClientError::ParseUrl(_) => return Err(MyError::SpotifyDetailedError("ParseUrl")),
+                ClientError::Http(ureq_err) => match *ureq_err {
+                    rspotify::http::HttpError::Transport(_) => {
+                        return Err(MyError::SpotifyDetailedError("UreqTransport"))
+                    }
+                    rspotify::http::HttpError::Io(_) => {
+                        return Err(MyError::SpotifyDetailedError("UreqIo"))
+                    }
+                    rspotify::http::HttpError::StatusCode(code) => match code.status() {
+                        403 => return Ok(()),
+                        _val => return Err(MyError::SpotifyDetailedError("UreqHttpCode")),
+                    },
+                },
+                ClientError::Io(_) => return Err(MyError::SpotifyDetailedError("Io")),
+                ClientError::CacheFile(_) => {
+                    return Err(MyError::SpotifyDetailedError("CacheFile"))
+                }
+                ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
+            },
+        }
     }
 
-    pub async fn pause(&self) -> Result<(), MyError> {
-        self.client.pause_playback(None).await?;
-        Ok(())
+    pub fn pause(&self) -> Result<(), MyError> {
+        let result = self.client.pause_playback(None);
+
+        // We want to filter the 403 status-code response out, it is technically an error,
+        // but only because we wanted to pause on a already paused song.
+        match result {
+            Ok(_) => return Ok(()),
+            Err(error) => match error {
+                ClientError::ParseJson(_) => {
+                    return Err(MyError::SpotifyDetailedError("ParseJson"))
+                }
+                ClientError::ParseUrl(_) => return Err(MyError::SpotifyDetailedError("ParseUrl")),
+                ClientError::Http(ureq_err) => match *ureq_err {
+                    rspotify::http::HttpError::Transport(_) => {
+                        return Err(MyError::SpotifyDetailedError("UreqTransport"))
+                    }
+                    rspotify::http::HttpError::Io(_) => {
+                        return Err(MyError::SpotifyDetailedError("UreqIo"))
+                    }
+                    rspotify::http::HttpError::StatusCode(code) => match code.status() {
+                        403 => return Ok(()),
+                        _val => return Err(MyError::SpotifyDetailedError("UreqHttpCode")),
+                    },
+                },
+                ClientError::Io(_) => return Err(MyError::SpotifyDetailedError("Io")),
+                ClientError::CacheFile(_) => {
+                    return Err(MyError::SpotifyDetailedError("CacheFile"))
+                }
+                ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
+            },
+        }
+    }
+
+    pub fn skip(&self) -> Result<(), MyError> {
+        let result = self.client.next_track(None);
+
+        // We want to filter the 403 status-code response out, it is technically an error,
+        // but only because we wanted to pause on a already paused song.
+        match result {
+            Ok(_) => return Ok(()),
+            Err(error) => match error {
+                ClientError::ParseJson(_) => {
+                    return Err(MyError::SpotifyDetailedError("ParseJson"))
+                }
+                ClientError::ParseUrl(_) => return Err(MyError::SpotifyDetailedError("ParseUrl")),
+                ClientError::Http(ureq_err) => match *ureq_err {
+                    rspotify::http::HttpError::Transport(_) => {
+                        return Err(MyError::SpotifyDetailedError("UreqTransport"))
+                    }
+                    rspotify::http::HttpError::Io(_) => {
+                        return Err(MyError::SpotifyDetailedError("UreqIo"))
+                    }
+                    rspotify::http::HttpError::StatusCode(code) => match code.status() {
+                        403 => return Ok(()),
+                        _val => return Err(MyError::SpotifyDetailedError("UreqHttpCode")),
+                    },
+                },
+                ClientError::Io(_) => return Err(MyError::SpotifyDetailedError("Io")),
+                ClientError::CacheFile(_) => {
+                    return Err(MyError::SpotifyDetailedError("CacheFile"))
+                }
+                ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
+            },
+        }
     }
 }

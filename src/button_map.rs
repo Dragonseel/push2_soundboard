@@ -59,7 +59,7 @@ pub struct ButtonMap {
 }
 
 impl ButtonMap {
-    pub async fn new(
+    pub fn new(
         sound_system: Arc<Mutex<SoundSystem>>,
         midiconn: &Arc<Mutex<MidiConnection>>,
     ) -> Result<ButtonMap, MyError> {
@@ -85,7 +85,7 @@ impl ButtonMap {
         device_modes.push(Box::new(SoundMode::new(sound_system)?));
 
         #[cfg(feature = "spotify")]
-        device_modes.push(Box::new(SpotifyMode::new().await?));
+        device_modes.push(Box::new(SpotifyMode::new()?));
 
         device_modes[0].apply_button_lights(midiconn, &button_values)?;
 

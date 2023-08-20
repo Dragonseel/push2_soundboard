@@ -18,8 +18,8 @@ ron = "*"
 serde = "*"
 serde_derive = "*"
 notify-debouncer-full = "*"
-tokio = { version = "1", features = ["full"]}
-rspotify = {version = "*", features = ["cli", "futures"] , optional = true}
+#tokio = { version = "1", features = ["full"]}
+rspotify = {version = "*", default-features = false, features = ["client-ureq", "ureq-rustls-tls"] , optional = true}
 open = {version = "*", optional = true}
 
 [build-dependencies]

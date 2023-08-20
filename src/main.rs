@@ -31,9 +31,8 @@ mod sound_system;
 #[cfg(feature = "spotify")]
 mod spotify;
 
-#[tokio::main]
-async fn main() {
-    match run().await {
+fn main() {
+    match run() {
         Ok(_) => (),
         Err(err) => println!("Error: {}", err),
     }
@@ -67,6 +66,9 @@ pub enum MyError {
 
     #[error(transparent)]
     SpotifyError(#[from] rspotify::ClientError),
+
+    #[error("SpotifyDetailedError")]
+    SpotifyDetailedError(&'static str),
 
     /// Represents all other cases of `std::io::Error`.
     #[error(transparent)]
@@ -125,7 +127,7 @@ macro_rules! lock_or_return_err {
     }};
 }
 
-async fn run() -> Result<(), MyError> {
+fn run() -> Result<(), MyError> {
     let mut file = File::open("config/devices.ron")?;
     let mut config_string = String::new();
     file.read_to_string(&mut config_string)
@@ -143,9 +145,10 @@ async fn run() -> Result<(), MyError> {
 
     let sound_system = Arc::new(Mutex::new(SoundSystem::new(&device_config.sound_device)?));
 
-    let button_mapping = Arc::new(Mutex::new(
-        ButtonMap::new(Arc::clone(&sound_system), &push2midi).await?,
-    ));
+    let button_mapping = Arc::new(Mutex::new(ButtonMap::new(
+        Arc::clone(&sound_system),
+        &push2midi,
+    )?));
 
     lock_or_return_err!(button_mapping).clear_button_lights(&push2midi)?;
     lock_or_return_err!(button_mapping).apply_button_lights(&push2midi)?;
