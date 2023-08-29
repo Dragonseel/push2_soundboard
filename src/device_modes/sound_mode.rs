@@ -28,7 +28,7 @@ use push2_display::Push2Display;
 
 use crate::{
     actions::{command::Command, sound::Sound, Action, ActionConfig, ActionState},
-    button_map::{ButtonType, ControlName, NoteName},
+    button_map::{ButtonType, ControlName, EncoderName, NoteName},
     sound_system::SoundSystem,
     MyError, DEFAULT_VOLUME, MAX_VOLUME,
 };
@@ -508,6 +508,11 @@ impl super::DeviceMode for SoundMode {
                         mutex_guard.send_to_device(&[0b10010000, *address, 0_u8])?;
                     }
                 }
+                ButtonType::Encoder(encoder_name) => {
+                    if *encoder_name == EncoderName::Control78 {
+                        mutex_guard.send_to_device(&[0b10110000, *address, 122u8])?;
+                    }
+                }
             }
         }
 
@@ -570,5 +575,24 @@ impl super::DeviceMode for SoundMode {
         self.display_sounds(display)?;
 
         Ok(())
+    }
+
+    fn encoder_change(
+        &mut self,
+        encoder_name: crate::button_map::EncoderName,
+        change: i16,
+    ) -> Result<LightAction, MyError> {
+        if encoder_name == EncoderName::Control78 {
+            let mut sound_guard = self
+                .sound_system
+                .try_lock()
+                .expect("Couldn't lock SoundSystem.");
+
+            sound_guard.change_volume(change);
+
+            return Ok(LightAction::None);
+        }
+
+        Ok(LightAction::None)
     }
 }

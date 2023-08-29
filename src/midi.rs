@@ -9,8 +9,7 @@ use crate::MyError;
 use std::sync::mpsc::channel;
 
 pub enum MidiMessage {
-    Btn(u8, u8),
-    Volume(i8),
+    Input(u8, i16),
 }
 
 const CONTROL_CHANGE: u8 = 0xB0;
@@ -45,17 +44,20 @@ impl MidiConnection {
             "Push2_Soundboard-InPort",
             move |_, message, tx| {
                 match message {
-                    [CONTROL_CHANGE, 0x4E, value] => tx
-                        .send(MidiMessage::Volume(MidiConnection::get_endcoder_value(
-                            value,
-                        )))
-                        .expect("Could not send volume message through channel"),
-                    [CONTROL_CHANGE, address, value] => {
-                        tx.send(MidiMessage::Btn(*address, *value))
-                            .expect("Could not send control change message through channel.");
+                    [CONTROL_CHANGE, address, value] => {                        
+                        if address == &0x4E || address == &0x47 {
+                            tx.send(MidiMessage::Input(
+                                *address,
+                                MidiConnection::get_endcoder_value(value),
+                            ))
+                            .expect("Could not send volume message through channel")
+                        } else {
+                            tx.send(MidiMessage::Input(*address, (*value) as i16))
+                                .expect("Could not send control change message through channel.");
+                        }
                     }
                     [NOTE_ON, address, value] => {
-                        tx.send(MidiMessage::Btn(*address, *value))
+                        tx.send(MidiMessage::Input(*address, (*value) as i16))
                             .expect("Could not send note on message through channel");
                     }
                     _ => {
@@ -82,12 +84,12 @@ impl MidiConnection {
         Ok(())
     }
 
-    fn get_endcoder_value(value: &u8) -> i8 {
+    fn get_endcoder_value(value: &u8) -> i16 {
         let is_right: bool = (value & 0xC0) == 0;
         if is_right {
-            (value & 0x3F) as i8
+            (value & 0x3F) as i16
         } else {
-            (64 - ((value & 0x3F) as i8)) * -1
+            (64 - ((value & 0x3F) as i16)) * -1
         }
     }
 

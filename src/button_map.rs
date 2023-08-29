@@ -12,10 +12,26 @@ mod unformatted {
 
     #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize, Debug)]
     pub enum ButtonType {
+        Encoder(EncoderName),
         ControlChange(ControlName),
         Note(NoteName)
     }
 
+
+    #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize, Debug)]
+    pub enum EncoderName {
+        Control14, // Top-Left over first "tap tempo" button
+        Control15, // Top-Left over second "metronome" button
+        Control71, // First one over display
+        Control72,
+        Control73,
+        Control74,
+        Control75,
+        Control76,
+        Control77,
+        Control78, // Last one over the display
+        Control79, // Top-Right "master volume" knob over "setup", and "user" buttons
+    }
 
     #[derive(PartialEq, Eq, Hash, Clone, Copy, Deserialize, Debug)]
     pub enum NoteName {
@@ -49,7 +65,7 @@ use crate::{
 #[cfg(feature = "spotify")]
 use crate::device_modes::spotify_mode::SpotifyMode;
 
-pub use unformatted::{ButtonType, ControlName, NoteName};
+pub use unformatted::{ButtonType, ControlName, EncoderName, NoteName};
 
 pub struct ButtonMap {
     button_values: HashMap<u8, ButtonType>,
@@ -99,6 +115,7 @@ impl ButtonMap {
     pub fn activate_button(
         &mut self,
         address: u8,
+        change: i16,
         midiconn: &Arc<Mutex<MidiConnection>>,
     ) -> Result<(), MyError> {
         let mut light_action = LightAction::None;
@@ -126,7 +143,13 @@ impl ButtonMap {
                     }
                 }
                 ButtonType::Note(note_name) => {
-                    light_action = self.device_modes[self.current_mode].button_press(*note_name)?
+                    light_action = self.device_modes[self.current_mode].button_press(*note_name)?;
+                }
+                ButtonType::Encoder(encoder_name) => {
+                    
+                    println!("Got encoder change: {:?} - {:?}", encoder_name, change);
+                    light_action = self.device_modes[self.current_mode]
+                        .encoder_change(*encoder_name, change)?;
                 }
             }
         }
@@ -184,6 +207,7 @@ impl ButtonMap {
                 match _name {
                     ButtonType::ControlChange(_) => 0b10110000,
                     ButtonType::Note(_) => 0b10010000,
+                    ButtonType::Encoder(_) => 0b10110000,
                 },
                 *address,
                 0u8,

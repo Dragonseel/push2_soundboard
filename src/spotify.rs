@@ -5,7 +5,7 @@ use std::{
 };
 
 use rspotify::{
-    model::{AdditionalType, Country, Market},
+    model::{AdditionalType, Country, Market, PrivateUser, SimplifiedPlaylist},
     prelude::*,
     scopes, AuthCodeSpotify, ClientError, Config, Credentials, OAuth,
 };
@@ -14,6 +14,7 @@ use crate::MyError;
 
 pub struct Spotify {
     client: AuthCodeSpotify,
+    user: PrivateUser,
 }
 
 impl Spotify {
@@ -56,7 +57,18 @@ impl Spotify {
             Err(err) => println!("{:?}", err),
         }
 
-        Ok(Spotify { client })
+        let current_user = match client.current_user() {
+            Ok(user) => user,
+            Err(err) => {
+                println!("{:?}", err);
+                return Err(MyError::SpotifyDetailedError("Could not get current user"));
+            }
+        };
+
+        Ok(Spotify {
+            client,
+            user: current_user,
+        })
     }
 
     fn prompt_for_token(url: &str, client: &AuthCodeSpotify) -> Result<(), MyError> {
@@ -297,5 +309,28 @@ impl Spotify {
                 ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
             },
         }
+    }
+
+    pub fn get_user_playlists(&self) -> Result<Vec<SimplifiedPlaylist>, MyError> {
+        let playlists: Vec<Result<rspotify::model::SimplifiedPlaylist, ClientError>> =
+            self.client.user_playlists(self.user.id.clone()).collect();
+
+        let playlists = playlists
+            .into_iter()
+            .map(|playlist_result| playlist_result.expect("Could not get a playlist"))
+            .collect();
+
+        Ok(playlists)
+    }
+
+    pub fn play_playlist(&self, playlist: SimplifiedPlaylist) -> Result<(), MyError> {
+        self.client.start_context_playback(
+            PlayContextId::Playlist(playlist.id),
+            None,
+            None,
+            None,
+        )?;
+
+        Ok(())
     }
 }

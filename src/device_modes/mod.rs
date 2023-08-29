@@ -6,7 +6,7 @@ use std::{
 use push2_display::Push2Display;
 
 use crate::{
-    button_map::{ButtonType, ControlName, NoteName},
+    button_map::{ButtonType, ControlName, EncoderName, NoteName},
     midi::MidiConnection,
     MyError,
 };
@@ -27,6 +27,12 @@ pub trait DeviceMode {
     fn button_press(&mut self, note_name: NoteName) -> Result<LightAction, MyError>;
 
     fn control_press(&mut self, control_name: ControlName) -> Result<LightAction, MyError>;
+
+    fn encoder_change(
+        &mut self,
+        encoder_name: EncoderName,
+        change: i16,
+    ) -> Result<LightAction, MyError>;
 
     fn apply_button_lights(
         &mut self,

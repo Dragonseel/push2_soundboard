@@ -74,7 +74,7 @@ impl SoundSystem {
         }
     }
 
-    pub fn change_volume(&mut self, change: i8) {
+    pub fn change_volume(&mut self, change: i16) {
         if change.is_negative() {
             self.volume = self.volume.saturating_sub(change.abs() as u32);
         } else {

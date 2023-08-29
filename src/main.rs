@@ -174,12 +174,9 @@ fn run() -> Result<(), MyError> {
                 FrameAction::Tick => {
                     while let Ok(msg) = receiver.try_recv() {
                         match msg {
-                            MidiMessage::Btn(address, _value) => {
+                            MidiMessage::Input(address, value) => {
                                 lock_or_return_err!(button_mapping)
-                                    .activate_button(address, &push2midi)?
-                            }
-                            MidiMessage::Volume(change) => {
-                                lock_or_return_err!(sound_system).change_volume(change)
+                                    .activate_button(address, value, &push2midi)?
                             }
                         }
                     }
