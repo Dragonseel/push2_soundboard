@@ -64,6 +64,7 @@ pub enum MyError {
     #[error("FileWatcher error")]
     FileWatcher(&'static str),
 
+    #[cfg(feature = "spotify")]
     #[error(transparent)]
     SpotifyError(#[from] rspotify::ClientError),
 

@@ -241,6 +241,8 @@ impl Spotify {
                     return Err(MyError::SpotifyDetailedError("CacheFile"))
                 }
                 ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
+                ClientError::TokenCallbackFn(callback_error) => todo!(),
+                ClientError::InvalidToken => todo!(),
             },
         }
     }
@@ -274,6 +276,8 @@ impl Spotify {
                     return Err(MyError::SpotifyDetailedError("CacheFile"))
                 }
                 ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
+                ClientError::TokenCallbackFn(callback_error) => todo!(),
+                ClientError::InvalidToken => todo!(),
             },
         }
     }
@@ -307,6 +311,8 @@ impl Spotify {
                     return Err(MyError::SpotifyDetailedError("CacheFile"))
                 }
                 ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
+                ClientError::TokenCallbackFn(callback_error) => todo!(),
+                ClientError::InvalidToken => todo!(),
             },
         }
     }

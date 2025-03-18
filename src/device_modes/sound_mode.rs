@@ -92,7 +92,7 @@ impl SoundMode {
         // Add a path to be watched. All files and directories at that path and
         // below will be monitored for changes.
         match debouncer
-            .watcher()
+            
             .watch(Path::new("."), RecursiveMode::Recursive)
         {
             Ok(()) => (),
@@ -103,12 +103,13 @@ impl SoundMode {
             }
         }
 
+        /*
         // Add the same path to the file ID cache. The cache uses unique file IDs
         // provided by the file system and is used to stich together rename events
         // in case the notification back-end doesn't emit rename cookies.
-        debouncer
-            .cache()
+        debouncer.
             .add_root(Path::new("."), RecursiveMode::Recursive);
+*/
 
         self.read_config_impl(Path::new(path))?;
 
