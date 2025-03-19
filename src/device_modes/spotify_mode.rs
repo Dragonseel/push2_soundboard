@@ -366,7 +366,7 @@ impl super::DeviceMode for SpotifyMode {
             .expect("Infallible");
         }
 
-        if let Some(ref playlists) = &self.playlists {
+        if let Some(playlists) = &self.playlists {
             for (index, playlist) in playlists.iter().enumerate() {
                 Text::new(
                     &playlist.name,

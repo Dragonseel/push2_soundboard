@@ -78,24 +78,23 @@ impl Spotify {
 
                 // Load token into client regardless of whether it's expired o
                 // not, since it will be refreshed later anyway.
-                *{
-                    match client.get_token().lock() {
-                        Ok(val) => val,
-                        Err(_) => return Err(MyError::MutexError("Spotify Client")),
-                    }
-                } = Some(new_token);
+                match client.get_token().lock() {
+                    Ok(mut val) => *val = Some(new_token),
+                    Err(_) => return Err(MyError::MutexError("Spotify Client")),
+                }
+
+     
 
                 if expired {
                     // Ensure that we actually got a token from the refetch
                     match client.refetch_token()? {
                         Some(refreshed_token) => {
                             println!("Successfully refreshed expired token from token cache");
-                            *{
-                                match client.get_token().lock() {
-                                    Ok(val) => val,
-                                    Err(_) => return Err(MyError::MutexError("Spotify Client")),
-                                }
-                            } = Some(refreshed_token)
+                            
+                            match client.get_token().lock() {
+                                Ok(mut val) => *val = Some(refreshed_token),
+                                Err(_) => return Err(MyError::MutexError("Spotify Client")),
+                            }
                         }
                         // If not, prompt the user for it
                         None => {
@@ -241,8 +240,14 @@ impl Spotify {
                     return Err(MyError::SpotifyDetailedError("CacheFile"))
                 }
                 ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
-                ClientError::TokenCallbackFn(callback_error) => todo!(),
-                ClientError::InvalidToken => todo!(),
+                ClientError::TokenCallbackFn(callback_error) => return Err(MyError::SpotifyDetailedError("TokenCallbackFn")),
+                ClientError::InvalidToken => return Err(MyError::SpotifyDetailedError("InvalidToken")),
+ClientError::AuthCodeListenerBind { addr, e } => return Err(MyError::SpotifyDetailedError("AuthCodeListenerBind")),
+                ClientError::AuthCodeListenerTerminated => return Err(MyError::SpotifyDetailedError("AuthCodeListenerTerminated")),
+                ClientError::AuthCodeListenerRead => return Err(MyError::SpotifyDetailedError("AuthCodeListenerRead")),
+                ClientError::AuthCodeListenerParse(_) => return Err(MyError::SpotifyDetailedError("AuthCodeListenerParse")),
+                ClientError::AuthCodeListenerWrite => return Err(MyError::SpotifyDetailedError("AuthCodeListenerWrite")),
+
             },
         }
     }
@@ -256,28 +261,33 @@ impl Spotify {
             Ok(_) => return Ok(()),
             Err(error) => match error {
                 ClientError::ParseJson(_) => {
-                    return Err(MyError::SpotifyDetailedError("ParseJson"))
-                }
+                                return Err(MyError::SpotifyDetailedError("ParseJson"))
+                            }
                 ClientError::ParseUrl(_) => return Err(MyError::SpotifyDetailedError("ParseUrl")),
                 ClientError::Http(ureq_err) => match *ureq_err {
-                    rspotify::http::HttpError::Transport(_) => {
-                        return Err(MyError::SpotifyDetailedError("UreqTransport"))
-                    }
-                    rspotify::http::HttpError::Io(_) => {
-                        return Err(MyError::SpotifyDetailedError("UreqIo"))
-                    }
-                    rspotify::http::HttpError::StatusCode(code) => match code.status() {
-                        403 => return Ok(()),
-                        _val => return Err(MyError::SpotifyDetailedError("UreqHttpCode")),
-                    },
-                },
+                                rspotify::http::HttpError::Transport(_) => {
+                                    return Err(MyError::SpotifyDetailedError("UreqTransport"))
+                                }
+                                rspotify::http::HttpError::Io(_) => {
+                                    return Err(MyError::SpotifyDetailedError("UreqIo"))
+                                }
+                                rspotify::http::HttpError::StatusCode(code) => match code.status() {
+                                    403 => return Ok(()),
+                                    _val => return Err(MyError::SpotifyDetailedError("UreqHttpCode")),
+                                },
+                            },
                 ClientError::Io(_) => return Err(MyError::SpotifyDetailedError("Io")),
                 ClientError::CacheFile(_) => {
-                    return Err(MyError::SpotifyDetailedError("CacheFile"))
-                }
+                                return Err(MyError::SpotifyDetailedError("CacheFile"))
+                            }
                 ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
-                ClientError::TokenCallbackFn(callback_error) => todo!(),
-                ClientError::InvalidToken => todo!(),
+                ClientError::TokenCallbackFn(callback_error) => return Err(MyError::SpotifyDetailedError("TokenCallbackFn")),
+                ClientError::InvalidToken => return Err(MyError::SpotifyDetailedError("InvalidToken")),
+ClientError::AuthCodeListenerBind { addr, e } => return Err(MyError::SpotifyDetailedError("AuthCodeListenerBind")),
+                ClientError::AuthCodeListenerTerminated => return Err(MyError::SpotifyDetailedError("AuthCodeListenerTerminated")),
+                ClientError::AuthCodeListenerRead => return Err(MyError::SpotifyDetailedError("AuthCodeListenerRead")),
+                ClientError::AuthCodeListenerParse(_) => return Err(MyError::SpotifyDetailedError("AuthCodeListenerParse")),
+                ClientError::AuthCodeListenerWrite => return Err(MyError::SpotifyDetailedError("AuthCodeListenerWrite")),
             },
         }
     }
@@ -291,28 +301,33 @@ impl Spotify {
             Ok(_) => return Ok(()),
             Err(error) => match error {
                 ClientError::ParseJson(_) => {
-                    return Err(MyError::SpotifyDetailedError("ParseJson"))
-                }
+                                return Err(MyError::SpotifyDetailedError("ParseJson"))
+                            }
                 ClientError::ParseUrl(_) => return Err(MyError::SpotifyDetailedError("ParseUrl")),
                 ClientError::Http(ureq_err) => match *ureq_err {
-                    rspotify::http::HttpError::Transport(_) => {
-                        return Err(MyError::SpotifyDetailedError("UreqTransport"))
-                    }
-                    rspotify::http::HttpError::Io(_) => {
-                        return Err(MyError::SpotifyDetailedError("UreqIo"))
-                    }
-                    rspotify::http::HttpError::StatusCode(code) => match code.status() {
-                        403 => return Ok(()),
-                        _val => return Err(MyError::SpotifyDetailedError("UreqHttpCode")),
-                    },
-                },
+                                rspotify::http::HttpError::Transport(_) => {
+                                    return Err(MyError::SpotifyDetailedError("UreqTransport"))
+                                }
+                                rspotify::http::HttpError::Io(_) => {
+                                    return Err(MyError::SpotifyDetailedError("UreqIo"))
+                                }
+                                rspotify::http::HttpError::StatusCode(code) => match code.status() {
+                                    403 => return Ok(()),
+                                    _val => return Err(MyError::SpotifyDetailedError("UreqHttpCode")),
+                                },
+                            },
                 ClientError::Io(_) => return Err(MyError::SpotifyDetailedError("Io")),
                 ClientError::CacheFile(_) => {
-                    return Err(MyError::SpotifyDetailedError("CacheFile"))
-                }
+                                return Err(MyError::SpotifyDetailedError("CacheFile"))
+                            }
                 ClientError::Model(_) => return Err(MyError::SpotifyDetailedError("Model")),
                 ClientError::TokenCallbackFn(callback_error) => todo!(),
-                ClientError::InvalidToken => todo!(),
+                ClientError::InvalidToken => return Err(MyError::SpotifyDetailedError("InvalidToken")),
+ClientError::AuthCodeListenerBind { addr, e } => return Err(MyError::SpotifyDetailedError("AuthCodeListenerBind")),
+                ClientError::AuthCodeListenerTerminated => return Err(MyError::SpotifyDetailedError("AuthCodeListenerTerminated")),
+                ClientError::AuthCodeListenerRead => return Err(MyError::SpotifyDetailedError("AuthCodeListenerRead")),
+                ClientError::AuthCodeListenerParse(_) => return Err(MyError::SpotifyDetailedError("AuthCodeListenerParse")),
+                ClientError::AuthCodeListenerWrite => return Err(MyError::SpotifyDetailedError("AuthCodeListenerWrite")),
             },
         }
     }

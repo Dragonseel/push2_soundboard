@@ -1,17 +1,17 @@
 [package]
 name = "push2_soundboard"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-midir = "0.9.1"
-anyhow = "1.0.56"
-thiserror = "1.0.30"
-gameloop = "0.2.0"
-push2_display = "0.2.0"
-embedded-graphics = "0.7.1"
+midir = "*"
+anyhow = "*"
+thiserror = "*"
+gameloop = "*"
+push2_display = { git = "https://github.com/mbracher/push2_display.git"}
+embedded-graphics = "*"
 rodio = "*"
 tray-item = "*"
 ron = "*"
